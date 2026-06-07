@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Supprimer les flèches spinner sur tous les inputs numériques */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -23,4 +28,11 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+input,
+textarea,
+select {
+  color: #000;
+  background-color: #fff;
 }
