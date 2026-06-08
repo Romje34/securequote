@@ -91,7 +91,7 @@ export async function sendQuoteEmail(opts: {
   const { error } = await getResend().emails.send({
     from:     FROM,
     to:       [opts.to],
-    reply_to: opts.reply_to ?? undefined,
+    replyTo:  opts.reply_to ?? undefined,
     subject:  `Devis N° ${opts.quote_number} — ${opts.company_name}`,
     html,
   })
