@@ -63,9 +63,15 @@ function QuotesPageInner() {
   const [user,        setUser]        = useState<User | null>(null)
   const [quotes,      setQuotes]      = useState<Quote[]>([])
   const [loading,     setLoading]     = useState(true)
+  const [loadingKey,  setLoadingKey]  = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
   const [search,      setSearch]      = useState("")
   const [companyFilter, setCompanyFilter] = useState<string | null>(companyFilterFromUrl)
+  const [prevCompanyFilterFromUrl, setPrevCompanyFilterFromUrl] = useState(companyFilterFromUrl)
+  if (companyFilterFromUrl !== prevCompanyFilterFromUrl) {
+    setPrevCompanyFilterFromUrl(companyFilterFromUrl)
+    setCompanyFilter(companyFilterFromUrl)
+  }
 
   const [quotePopup, setQuotePopup] = useState(false)
   const [qForm, setQForm] = useState(EMPTY_QFORM)
@@ -80,11 +86,14 @@ function QuotesPageInner() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  useEffect(() => { setCompanyFilter(companyFilterFromUrl) }, [companyFilterFromUrl])
+  const queryKey = user ? `${user.id}|${companyFilter ?? ""}` : null
+  if (queryKey && queryKey !== loadingKey) {
+    setLoadingKey(queryKey)
+    setLoading(true)
+  }
 
   useEffect(() => {
     if (!user) return
-    setLoading(true)
     const url = companyFilter ? `/api/quotes?company_id=${companyFilter}` : "/api/quotes"
     fetch(url)
       .then(r => r.ok ? r.json() : [])
@@ -159,7 +168,7 @@ function QuotesPageInner() {
     const res = await fetch(`/api/quotes/${quoteId}/duplicate`, { method: "POST" })
     const data = await res.json()
     if (res.ok) {
-      window.location.href = `/quotes/${data.id}`
+      window.location.assign(`/quotes/${data.id}`)
     } else {
       setDuplicatingId(null)
       alert(data.error ?? "Erreur lors de la duplication du devis")

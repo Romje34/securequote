@@ -305,6 +305,7 @@ export function QuotePDF({ quote, branding }: { quote: PDFQuote; branding: PDFBr
         {/* En-tête */}
         <View style={S.headerRow}>
           {branding.logo_url ? (
+            // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image, not HTML img
             <Image src={branding.logo_url} style={S.logo} />
           ) : (
             <View style={S.logoPlaceholder}>
@@ -473,6 +474,7 @@ export function QuotePDF({ quote, branding }: { quote: PDFQuote; branding: PDFBr
           <View style={S.signatureBlock}>
             <Text style={S.signatureLabel}>Signature et cachet :</Text>
             {branding.signature_url
+              // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer Image, not HTML img
               ? <Image src={branding.signature_url} style={S.signatureImg} />
               : <View style={S.signatureBox} />
             }

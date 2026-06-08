@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import Image from "next/image"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
@@ -24,6 +25,11 @@ type PremiumProduct = {
   deadline: string | null
   featured: boolean
   my_order: { id: string; quantity: number; unit_price: number } | null
+}
+
+function daysUntil(deadline: string | null, now: number): number | null {
+  if (!deadline) return null
+  return Math.max(0, Math.ceil((new Date(deadline).getTime() - now) / 86400000))
 }
 
 // ─── Design system premium ───────────────────────────────────────────────────
@@ -85,6 +91,7 @@ export default function PremiumPage() {
   const [qty,        setQty]        = useState(1)
   const [submitting, setSubmitting] = useState(false)
   const [toast,      setToast]      = useState<{ msg: string; ok: boolean } | null>(null)
+  const [now]                       = useState(() => Date.now())
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok })
@@ -317,9 +324,7 @@ export default function PremiumPage() {
             </div>
             {featured.map(p => {
               const pct = Math.round(((p.unit_price_regular - p.unit_price_group) / p.unit_price_regular) * 100)
-              const days = p.deadline
-                ? Math.max(0, Math.ceil((new Date(p.deadline).getTime() - Date.now()) / 86400000))
-                : null
+              const days = daysUntil(p.deadline, now)
               return (
                 <div key={p.id} style={{
                   display: "flex", alignItems: "center", gap: 8,
@@ -396,6 +401,7 @@ export default function PremiumPage() {
               <ProductCard
                 key={product.id}
                 product={product}
+                now={now}
                 isJoining={joiningId === product.id}
                 qty={qty}
                 submitting={submitting}
@@ -514,7 +520,7 @@ export default function PremiumPage() {
         color: G.textFaint,
         fontSize: 12,
       }}>
-        SecureQuote Premium · Les prix groupés s&apos;activent à l&apos;atteinte du quota · Engagements sans obligation jusqu'au déclenchement
+        SecureQuote Premium · Les prix groupés s&apos;activent à l&apos;atteinte du quota · Engagements sans obligation jusqu&apos;au déclenchement
       </div>
     </div>
   )
@@ -523,10 +529,11 @@ export default function PremiumPage() {
 // ─── ProductCard ─────────────────────────────────────────────────────────────
 
 function ProductCard({
-  product, isJoining, qty, submitting,
+  product, now, isJoining, qty, submitting,
   onStartJoin, onCancelJoin, onQtyChange, onConfirmJoin, onCancelOrder,
 }: {
   product:        PremiumProduct
+  now:            number
   isJoining:      boolean
   qty:            number
   submitting:     boolean
@@ -544,9 +551,7 @@ function ProductCard({
   const urgency     = remaining <= Math.ceil(product.target_quantity * 0.15) && remaining > 0
   const brandColor  = BRAND_COLORS[product.brand ?? ""] ?? "#6366f1"
 
-  const daysLeft = product.deadline
-    ? Math.max(0, Math.ceil((new Date(product.deadline).getTime() - Date.now()) / 86400000))
-    : null
+  const daysLeft = daysUntil(product.deadline, now)
 
   return (
     <div style={{
@@ -573,11 +578,15 @@ function ProductCard({
         }} />
 
         {product.image_url ? (
-          <img
-            src={product.image_url}
-            alt={product.designation}
-            style={{ maxHeight: 140, maxWidth: "75%", objectFit: "contain", position: "relative" }}
-          />
+          <div style={{ position: "relative", height: 140, width: "75%" }}>
+            <Image
+              src={product.image_url}
+              alt={product.designation}
+              fill
+              unoptimized
+              style={{ objectFit: "contain" }}
+            />
+          </div>
         ) : (
           <div style={{ textAlign: "center", position: "relative" }}>
             <div style={{

@@ -1,10 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { useState, useEffect, useRef } from "react"
 import { use } from "react"
-
-const sb = createClient()
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,8 +65,6 @@ const STATUSES = [
   { key: "expired",  label: "Expiré",     color: "#f59e0b" },
 ]
 
-const UNITS = ["U", "Ens", "H", "J", "M", "M²", "Ml", "Forfait", "Lic", "An"]
-
 function fmtNum(n: number) {
   const abs = Math.abs(n)
   const sign = n < 0 ? "-" : ""
@@ -93,6 +88,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [dirty,    setDirty]    = useState(false)
   const [toast,    setToast]    = useState("")
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [newChapterTitle, setNewChapterTitle] = useState("")
   const [catalogOpen, setCatalogOpen] = useState(false)
@@ -104,48 +100,53 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000) }
 
-  const load = useCallback(async () => {
-    setLoadError(null)
-    try {
-      const res = await fetch(`/api/quotes/${id}`)
-      if (res.status === 401) { window.location.href = "/login"; return }
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setLoadError(`Erreur ${res.status} — ${body.error ?? "devis introuvable"}`)
-        return
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      try {
+        const res = await fetch(`/api/quotes/${id}`)
+        if (res.status === 401) { window.location.href = "/login"; return }
+        if (cancelled) return
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          if (!cancelled) setLoadError(`Erreur ${res.status} — ${body.error ?? "devis introuvable"}`)
+          return
+        }
+        const d = await res.json()
+        const sorted: Chapter[] = ((d.quote_chapters ?? []) as Chapter[])
+          .sort((a, b) => a.position - b.position)
+          .map(ch => ({
+            id:       ch.id,
+            position: ch.position,
+            title:    ch.title,
+            items:    [...(ch.items ?? [])].sort((a, b) => a.position - b.position),
+          }))
+        if (cancelled) return
+        setHeader({
+          quote_number: d.quote_number, status: d.status,
+          title:        d.title        ?? "",
+          reference:    d.reference    ?? "",
+          site_address: d.site_address ?? "",
+          issued_at:    d.issued_at    ?? "",
+          valid_until:  d.valid_until  ?? "",
+          salesperson:  d.salesperson  ?? "",
+          notes:        d.notes        ?? "",
+          conditions:   d.conditions   ?? "",
+          tva_rate:     d.tva_rate     ?? 20,
+          client_id:    d.client_id    ?? null,
+          clients:      d.clients      ?? null,
+          companies:    d.companies    ?? null,
+        })
+        setChapters(sorted)
+        setDirty(false)
+        setLoadError(null)
+      } catch (e) {
+        if (!cancelled) setLoadError(`Erreur réseau : ${String(e)}`)
       }
-      const d = await res.json()
-      const sorted: Chapter[] = ((d.quote_chapters ?? []) as Chapter[])
-        .sort((a, b) => a.position - b.position)
-        .map(ch => ({
-          id:       ch.id,
-          position: ch.position,
-          title:    ch.title,
-          items:    [...(ch.items ?? [])].sort((a, b) => a.position - b.position),
-        }))
-      setHeader({
-        quote_number: d.quote_number, status: d.status,
-        title:        d.title        ?? "",
-        reference:    d.reference    ?? "",
-        site_address: d.site_address ?? "",
-        issued_at:    d.issued_at    ?? "",
-        valid_until:  d.valid_until  ?? "",
-        salesperson:  d.salesperson  ?? "",
-        notes:        d.notes        ?? "",
-        conditions:   d.conditions   ?? "",
-        tva_rate:     d.tva_rate     ?? 20,
-        client_id:    d.client_id    ?? null,
-        clients:      d.clients      ?? null,
-        companies:    d.companies    ?? null,
-      })
-      setChapters(sorted)
-      setDirty(false)
-    } catch (e) {
-      setLoadError(`Erreur réseau : ${String(e)}`)
     }
-  }, [id])
-
-  useEffect(() => { load() }, [load])
+    run()
+    return () => { cancelled = true }
+  }, [id, reloadTick])
 
   async function saveHeader(patch: Partial<QuoteHeader>) {
     setSaving(true)
@@ -321,7 +322,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   if (loadError) return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", flexDirection: "column", gap: 16 }}>
       <div style={{ color: "#ef4444", fontSize: 15, fontWeight: 600 }}>{loadError}</div>
-      <button onClick={load} style={{ padding: "8px 20px", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
+      <button onClick={() => setReloadTick(t => t + 1)} style={{ padding: "8px 20px", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
         Réessayer
       </button>
       <a href="/companies" style={{ color: "#94a3b8", fontSize: 13 }}>← Retour</a>
@@ -923,24 +924,25 @@ function ItemRow({ item, alt, onChange, onBlur, onDelete, onSaveWith }: {
 // ─── CatalogDrawer ────────────────────────────────────────────────────────────
 
 function CatalogDrawer({ onClose, onAdd }: { onClose: () => void; onAdd: (p: CatalogProduct) => void }) {
-  const [products, setProducts] = useState<CatalogProduct[]>([])
+  const [products, setProducts] = useState<CatalogProduct[] | null>(null)
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState("")
-  const [loading, setLoading] = useState(false)
 
   const CATS = ["", "VMS", "Cloud", "IA / Analyse", "Accès", "Support"]
 
   useEffect(() => {
     let cancel = false
-    setLoading(true)
     const params = new URLSearchParams()
     if (search)   params.set("q", search)
     if (category) params.set("category", category)
     fetch(`/api/catalog?${params}`)
       .then(r => r.json())
-      .then(d => { if (!cancel) { setProducts(Array.isArray(d) ? d : []); setLoading(false) } })
+      .then(d => { if (!cancel) setProducts(Array.isArray(d) ? d : []) })
     return () => { cancel = true }
   }, [search, category])
+
+  const loading = products === null
+  const items = products ?? []
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex" }}>
@@ -981,10 +983,10 @@ function CatalogDrawer({ onClose, onAdd }: { onClose: () => void; onAdd: (p: Cat
 
         <div style={{ flex: 1, padding: "8px 0" }}>
           {loading && <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>Chargement…</div>}
-          {!loading && products.length === 0 && (
+          {!loading && items.length === 0 && (
             <div style={{ padding: 24, textAlign: "center", color: "#94a3b8", fontSize: 13 }}>Aucun produit trouvé</div>
           )}
-          {products.map(p => (
+          {items.map(p => (
             <div key={p.id}
               onClick={() => { onAdd(p); onClose() }}
               style={{ padding: "12px 16px", cursor: "pointer", borderBottom: "1px solid #f8fafc", transition: "background 0.1s" }}

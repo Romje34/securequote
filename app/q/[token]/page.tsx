@@ -91,8 +91,8 @@ export default function PublicQuotePage({ params }: { params: Promise<{ token: s
   const { token } = use(params)
 
   const [quote, setQuote] = useState<QuoteData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const loading = !quote && !error
 
   const [signerName, setSignerName] = useState("")
   const [accepted, setAccepted] = useState(false)
@@ -102,7 +102,6 @@ export default function PublicQuotePage({ params }: { params: Promise<{ token: s
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
     fetch(`/api/q/${token}`)
       .then(async r => {
         const json = await r.json()
@@ -111,7 +110,6 @@ export default function PublicQuotePage({ params }: { params: Promise<{ token: s
       })
       .then(data => { if (!cancelled) setQuote(data) })
       .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : "Erreur") })
-      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [token])
 

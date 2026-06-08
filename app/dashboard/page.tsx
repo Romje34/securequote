@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
@@ -153,7 +154,6 @@ export default function Dashboard() {
 
   const isIntegrator  = userType !== "client"
   const ownCompanies  = companies.filter(c => c.is_own)
-  const memberCompanies = companies.filter(c => !c.is_own)
   const displayName   = user.email?.split("@")[0] ?? "—"
 
   return (
@@ -172,11 +172,11 @@ export default function Dashboard() {
           )}
         </div>
         <nav style={S.nav}>
-          <a href="/quotes" style={S.navLink}>Mes devis</a>
-          <a href="/companies" style={S.navLink}>Mes clients</a>
-          {isIntegrator && <a href="/settings" style={S.navLink}>Paramètres</a>}
+          <Link href="/quotes" style={S.navLink}>Mes devis</Link>
+          <Link href="/companies" style={S.navLink}>Mes clients</Link>
+          {isIntegrator && <Link href="/settings" style={S.navLink}>Paramètres</Link>}
           {isIntegrator && (
-            <a href="/premium" style={S.btnPremium}>✦ Premium</a>
+            <Link href="/premium" style={S.btnPremium}>✦ Premium</Link>
           )}
           <button onClick={() => sb.auth.signOut().then(() => { window.location.href = "/login" })} style={S.btnLogout}>
             Déconnexion
@@ -250,9 +250,9 @@ export default function Dashboard() {
                 </div>
 
                 <div style={{ ...S.card, padding: "14px 20px" }}>
-                  <a href="/companies" style={{ color: "#3b82f6", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
+                  <Link href="/companies" style={{ color: "#3b82f6", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
                     Gérer les clients →
-                  </a>
+                  </Link>
                 </div>
               </div>
 
@@ -312,7 +312,7 @@ export default function Dashboard() {
               <div style={S.card}>
                 <p style={{ color: "#64748b", margin: 0, fontSize: 14 }}>
                   Aucun client pour l&apos;instant.{" "}
-                  <a href="/companies" style={{ color: "#3b82f6", fontWeight: 600 }}>Créer un client →</a>
+                  <Link href="/companies" style={{ color: "#3b82f6", fontWeight: 600 }}>Créer un client →</Link>
                 </p>
               </div>
             ) : (
@@ -322,7 +322,7 @@ export default function Dashboard() {
                   const sentCount     = companyQuotes.filter(q => q.sent_at).length
                   const acceptedCount = companyQuotes.filter(q => q.status === "accepted").length
                   return (
-                    <a key={c.id} href={`/quotes?company=${c.id}`} style={{ ...S.companyCard, textDecoration: "none", display: "block", cursor: "pointer" }}>
+                    <Link key={c.id} href={`/quotes?company=${c.id}`} style={{ ...S.companyCard, textDecoration: "none", display: "block", cursor: "pointer" }}>
                       <div style={{ fontWeight: 700, color: "#1a202c", fontSize: 15 }}>{c.company_name}</div>
                       {c.city && <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{c.city}{c.country ? `, ${c.country}` : ""}</div>}
                       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
@@ -333,14 +333,14 @@ export default function Dashboard() {
                           ✅ {acceptedCount} accepté{acceptedCount > 1 ? "s" : ""}
                         </span>
                       </div>
-                    </a>
+                    </Link>
                   )
                 })}
               </div>
             )}
-            <a href="/companies" style={{ display: "inline-block", marginTop: 16, color: "#3b82f6", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
+            <Link href="/companies" style={{ display: "inline-block", marginTop: 16, color: "#3b82f6", fontSize: 13, fontWeight: 600, textDecoration: "none" }}>
               Gérer mes clients →
-            </a>
+            </Link>
           </>
         )}
       </div>

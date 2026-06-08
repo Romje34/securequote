@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import Image from "next/image"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
@@ -448,7 +449,7 @@ export default function SettingsPage() {
                   {/* Logo */}
                   <div style={{ flex: "0 0 80px" }}>
                     {branding.logo_url ? (
-                      <img src={branding.logo_url} alt="Logo" style={{ maxWidth: 80, maxHeight: 60, objectFit: "contain" }} />
+                      <Image src={branding.logo_url} alt="Logo" width={80} height={60} style={{ width: "auto", maxWidth: 80, maxHeight: 60, objectFit: "contain" }} />
                     ) : (
                       <div style={{
                         width: 80, height: 60, borderRadius: 6, background: "#f1f5f9",
@@ -550,10 +551,12 @@ function ImageUpload({
       />
       {value ? (
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <img
+          <Image
             src={value}
             alt=""
-            style={{ maxHeight: 48, maxWidth: 120, objectFit: "contain", borderRadius: 4, border: "1px solid #e2e8f0" }}
+            width={120}
+            height={48}
+            style={{ width: "auto", maxHeight: 48, maxWidth: 120, objectFit: "contain", borderRadius: 4, border: "1px solid #e2e8f0" }}
           />
           <div style={{ flex: 1, fontSize: 11, color: "#64748b", wordBreak: "break-all" }}>
             {value.split("/").pop()?.slice(0, 30)}...
