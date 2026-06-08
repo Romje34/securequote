@@ -19,6 +19,7 @@ function fmtNum(n: number) {
 
 export async function sendQuoteEmail(opts: {
   to:           string
+  reply_to?:    string | null
   quote_number: string
   title:        string | null
   client_name:  string | null
@@ -88,9 +89,10 @@ export async function sendQuoteEmail(opts: {
 </body></html>`
 
   const { error } = await getResend().emails.send({
-    from:    FROM,
-    to:      [opts.to],
-    subject: `Devis N° ${opts.quote_number} — ${opts.company_name}`,
+    from:     FROM,
+    to:       [opts.to],
+    reply_to: opts.reply_to ?? undefined,
+    subject:  `Devis N° ${opts.quote_number} — ${opts.company_name}`,
     html,
   })
 

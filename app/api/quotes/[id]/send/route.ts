@@ -112,6 +112,7 @@ export async function POST(request: Request, ctx: RouteContext) {
 
     await sendQuoteEmail({
       to:           recipientEmail,
+      reply_to:     user.email ?? null,
       quote_number: quote.quote_number,
       title:        quote.title,
       client_name:  client?.name ?? null,
