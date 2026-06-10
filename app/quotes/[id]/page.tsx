@@ -44,7 +44,7 @@ type QuoteHeader = {
   tva_rate: number
   client_id: string | null
   clients: { id: string; name: string; email: string | null } | null
-  companies: { company_name: string } | null
+  companies: { company_name: string; email: string | null } | null
 }
 
 type CatalogProduct = {
@@ -268,7 +268,8 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
   function openSend() {
     setSendError(null)
-    setSendEmail(header?.clients?.email ?? "")
+    // Pré-remplit avec l'email déjà renseigné : client en priorité, sinon société (toujours modifiable)
+    setSendEmail(header?.clients?.email || header?.companies?.email || "")
     setSendOpen(true)
   }
 

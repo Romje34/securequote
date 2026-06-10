@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+import { orgQuotePrefix } from '@/lib/quote-prefix'
 
 async function getSupabase() {
   const cookieStore = await cookies()
@@ -55,18 +56,10 @@ export async function POST(_req: Request, ctx: RouteContext) {
 
   if (!membership) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
-  // Récupérer le préfixe de branding pour générer le nouveau numéro
-  const { data: branding } = await db
-    .from('owner_branding')
-    .select('quote_prefix')
-    .eq('owner_id', user.id)
-    .maybeSingle()
-  const prefix = branding?.quote_prefix ?? 'DEV'
+  // Préfixe = 3 lettres du nom de l'organisation du user ; compteur global → référence unique
+  const prefix = await orgQuotePrefix(db, user.id)
 
-  const { data: numRow } = await db.rpc('next_quote_number', {
-    p_company_id: original.company_id,
-    p_prefix: prefix,
-  })
+  const { data: numRow } = await db.rpc('next_quote_number', { p_prefix: prefix })
   const quote_number = (numRow as string) ?? `${prefix}-${new Date().getFullYear()}-0001`
 
   // Créer la copie de l'en-tête (statut réinitialisé à "draft", pas de signature/envoi)

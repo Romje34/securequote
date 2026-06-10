@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
+import { orgQuotePrefix } from '@/lib/quote-prefix'
 
 async function getSupabase() {
   const cookieStore = await cookies()
@@ -38,17 +39,35 @@ export async function GET(request: Request) {
 
   const companyFilter = new URL(request.url).searchParams.get('company_id')
 
-  const { data: owned } = await adm()
+  const db = adm()
+
+  const { data: owned } = await db
     .from('company_members')
     .select('company_id')
     .eq('user_id', user.id)
     .eq('role', 'owner')
 
   let ids = (owned ?? []).map(r => r.company_id)
+
+  // Rollup owner : inclure les sociétés des members invités (leurs devis/KPI remontent à l'owner)
+  const { data: invitedMembers } = await db
+    .from('profiles')
+    .select('id')
+    .eq('invited_by', user.id)
+  const memberIds = (invitedMembers ?? []).map(p => p.id)
+  if (memberIds.length > 0) {
+    const { data: memberOwned } = await db
+      .from('company_members')
+      .select('company_id')
+      .in('user_id', memberIds)
+      .eq('role', 'owner')
+    for (const r of memberOwned ?? []) {
+      if (!ids.includes(r.company_id)) ids.push(r.company_id)
+    }
+  }
+
   if (companyFilter) ids = ids.filter(id => id === companyFilter)
   if (ids.length === 0) return NextResponse.json([])
-
-  const db = adm()
 
   const { data, error } = await db
     .from('quotes')
@@ -108,20 +127,18 @@ export async function POST(request: Request) {
 
   const db = adm()
 
-  // Récupérer le préfixe du branding de l'owner
+  // Valeurs par défaut du branding de l'owner (le préfixe vient de l'organisation, pas du branding)
   const { data: branding } = await db
     .from('owner_branding')
-    .select('quote_prefix, default_tva_rate, default_validity_days, default_conditions')
+    .select('default_tva_rate, default_validity_days, default_conditions')
     .eq('owner_id', user.id)
     .maybeSingle()
 
-  const prefix = branding?.quote_prefix ?? 'DEV'
+  // Préfixe = 3 lettres du nom de l'organisation du user (owner ou member)
+  const prefix = await orgQuotePrefix(db, user.id)
 
-  // Générer le numéro de devis
-  const { data: numRow } = await db.rpc('next_quote_number', {
-    p_company_id: company_id,
-    p_prefix: prefix,
-  })
+  // Générer le numéro de devis (compteur global → référence unique)
+  const { data: numRow } = await db.rpc('next_quote_number', { p_prefix: prefix })
   const quote_number = (numRow as string) ?? `${prefix}-${new Date().getFullYear()}-0001`
 
   // Créer un client inline si besoin

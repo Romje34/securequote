@@ -55,6 +55,10 @@ function single<T>(v: T | T[] | null): T | null {
   if (!v) return null
   return Array.isArray(v) ? (v[0] ?? null) : v
 }
+// Un devis est "gagné" s'il est signé électroniquement OU marqué accepté manuellement
+function isWon(q: { status: string; signed_at: string | null }) {
+  return q.status === "accepted" || !!q.signed_at
+}
 
 function QuotesPageInner() {
   const searchParams = useSearchParams()
@@ -79,12 +83,26 @@ function QuotesPageInner() {
   const [qCreating, setQCreating] = useState(false)
   const [qError, setQError] = useState("")
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null)
+  const [validatingId, setValidatingId] = useState<string | null>(null)
+  // company_id → propriété (société de l'owner ou d'un member) pour taguer l'origine du devis
+  const [companyMeta, setCompanyMeta] = useState<Record<string, { is_own: boolean; member_email: string | null }>>({})
 
   useEffect(() => {
     sb.auth.getUser().then(({ data }) => setUser(data.user))
     const { data: listener } = sb.auth.onAuthStateChange((_, session) => setUser(session?.user ?? null))
     return () => listener.subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (!user) return
+    fetch("/api/companies")
+      .then(r => r.ok ? r.json() : [])
+      .then((cs: { id: string; is_own: boolean; member_email: string | null }[]) => {
+        const map: Record<string, { is_own: boolean; member_email: string | null }> = {}
+        for (const c of cs) map[c.id] = { is_own: c.is_own, member_email: c.member_email }
+        setCompanyMeta(map)
+      })
+  }, [user])
 
   const queryKey = user ? `${user.id}|${companyFilter ?? ""}` : null
   if (queryKey && queryKey !== loadingKey) {
@@ -119,9 +137,9 @@ function QuotesPageInner() {
   const stats = useMemo(() => {
     const total      = quotes.length
     const sent       = quotes.filter(q => q.sent_at).length
-    const accepted   = quotes.filter(q => q.status === "accepted").length
+    const accepted   = quotes.filter(isWon).length
     const totalHT    = quotes.reduce((acc, q) => acc + q.total_ht, 0)
-    const signedHT   = quotes.filter(q => q.status === "accepted").reduce((acc, q) => acc + q.total_ht, 0)
+    const signedHT   = quotes.filter(isWon).reduce((acc, q) => acc + q.total_ht, 0)
     const conversion = sent > 0 ? Math.round((accepted / sent) * 100) : 0
     return { total, sent, accepted, totalHT, signedHT, conversion }
   }, [quotes])
@@ -163,6 +181,22 @@ function QuotesPageInner() {
     }
   }
 
+  async function handleValidate(quoteId: string) {
+    setValidatingId(quoteId)
+    const res = await fetch(`/api/quotes/${quoteId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "accepted" }),
+    })
+    if (res.ok) {
+      setQuotes(prev => prev.map(q => q.id === quoteId ? { ...q, status: "accepted" } : q))
+    } else {
+      const data = await res.json().catch(() => ({}))
+      alert(data.error ?? "Erreur lors de la validation du devis")
+    }
+    setValidatingId(null)
+  }
+
   async function handleDuplicate(quoteId: string) {
     setDuplicatingId(quoteId)
     const res = await fetch(`/api/quotes/${quoteId}/duplicate`, { method: "POST" })
@@ -185,11 +219,10 @@ function QuotesPageInner() {
     <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <header style={{ background: "#1a1a2e", padding: "16px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <a href="/dashboard" style={{ color: "#94a3b8", fontSize: 13, textDecoration: "none" }}>← Tableau de bord</a>
+          <a href="/companies" style={{ color: "#94a3b8", fontSize: 13, textDecoration: "none" }}>← Tableau de bord</a>
           <span style={{ color: "#334155" }}>|</span>
           <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>Mes devis</span>
         </div>
-        <a href="/companies" style={{ color: "#94a3b8", fontSize: 13, textDecoration: "none" }}>Mes clients</a>
       </header>
 
       <div style={{ maxWidth: 1240, margin: "0 auto", padding: "24px 16px" }}>
@@ -199,13 +232,13 @@ function QuotesPageInner() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 13, color: "#475569" }}>
-                Filtré par société{filteredCompanyName && <>: <strong>{filteredCompanyName}</strong></>}
+                Vue filtrée sur une seule société{filteredCompanyName && <>: <strong>{filteredCompanyName}</strong></>}
               </span>
               <button
                 onClick={() => { setCompanyFilter(null); window.history.replaceState(null, "", "/quotes") }}
-                style={{ fontSize: 12, color: "#3b82f6", background: "#dbeafe", border: "none", borderRadius: 20, padding: "3px 12px", cursor: "pointer", fontWeight: 600 }}
+                style={{ fontSize: 13, color: "#fff", background: "#1a1a2e", border: "none", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontWeight: 700 }}
               >
-                ✕ Retirer le filtre
+                ← Voir TOUS les devis (vous + vos members)
               </button>
             </div>
             <button
@@ -286,6 +319,11 @@ function QuotesPageInner() {
                       <td style={tdStyle}>
                         <div style={{ fontWeight: 600, color: "#1a202c" }}>{company?.company_name ?? "—"}</div>
                         {client?.name && <div style={{ fontSize: 12, color: "#64748b" }}>{client.name}</div>}
+                        {q.company_id && companyMeta[q.company_id] && !companyMeta[q.company_id].is_own && (
+                          <div style={{ display: "inline-block", marginTop: 4, fontSize: 10, fontWeight: 700, color: "#7c4dab", background: "#faf5ff", border: "1px solid #d4b8f0", borderRadius: 4, padding: "1px 6px" }}>
+                            👤 Membre{companyMeta[q.company_id].member_email ? ` — ${companyMeta[q.company_id].member_email}` : ""}
+                          </div>
+                        )}
                       </td>
                       <td style={{ ...tdStyle, color: "#64748b" }}>{q.title ?? "—"}</td>
                       <td style={tdStyle}>
@@ -309,6 +347,15 @@ function QuotesPageInner() {
                       </td>
                       <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
                         <a href={`/quotes/${q.id}`} style={linkBtnStyle}>Ouvrir</a>
+                        {!isWon(q) && (
+                          <button
+                            onClick={() => handleValidate(q.id)}
+                            disabled={validatingId === q.id}
+                            style={{ ...linkBtnStyle, marginLeft: 6, background: "#10b981", color: "#fff", border: "none", cursor: validatingId === q.id ? "default" : "pointer", opacity: validatingId === q.id ? 0.6 : 1 }}
+                          >
+                            {validatingId === q.id ? "Confirmation…" : "✓ Confirmé"}
+                          </button>
+                        )}
                         {q.public_token && (
                           <a href={`/q/${q.public_token}`} target="_blank" rel="noreferrer" style={{ ...linkBtnStyle, marginLeft: 6, background: "#f1f5f9", color: "#475569" }}>
                             Vue client

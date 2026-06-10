@@ -38,7 +38,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
   const { data: quote, error: qErr } = await db
     .from('quotes')
-    .select('*, clients(id, name, address, postal_code, city, country, phone, email, siret), companies(id, company_name, city)')
+    .select('*, clients(id, name, address, postal_code, city, country, phone, email, siret), companies(id, company_name, city, email, phone)')
     .eq('id', id)
     .single()
 

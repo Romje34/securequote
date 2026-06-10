@@ -110,7 +110,7 @@ export async function GET() {
 
   const { data: companies, error } = await admin
     .from('companies')
-    .select('id, company_name, city, country, created_at')
+    .select('id, company_name, city, country, email, phone, siret, vat_number, created_at')
     .in('id', allIds)
     .order('created_at', { ascending: false })
 
@@ -135,10 +135,13 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { company_name, city, address_line_1, postal_code, country } = body
+  const { company_name, email, phone, siret, vat_number, city, address_line_1, postal_code, country } = body
 
   if (!company_name) {
     return NextResponse.json({ error: 'company_name requis' }, { status: 400 })
+  }
+  if (!email?.trim() || !phone?.trim() || !siret?.trim() || !vat_number?.trim()) {
+    return NextResponse.json({ error: 'email, téléphone, siret et numéro de TVA sont requis' }, { status: 400 })
   }
 
   const { data, error } = await supabase.rpc('create_company_with_owner', {
@@ -147,6 +150,10 @@ export async function POST(request: Request) {
     p_address:      address_line_1 ?? null,
     p_postal_code:  postal_code ?? null,
     p_country:      country     ?? 'FR',
+    p_email:        email.trim(),
+    p_siret:        siret.trim(),
+    p_vat_number:   vat_number.trim(),
+    p_phone:        phone.trim(),
   })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

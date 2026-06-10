@@ -55,7 +55,7 @@ export async function POST(request: Request, ctx: RouteContext) {
 
     const { data: quote, error: quoteError } = await db
       .from('quotes')
-      .select('id, quote_number, title, valid_until, created_by, public_token, clients(id, name, email)')
+      .select('id, quote_number, title, valid_until, created_by, public_token, clients(id, name, email), companies(email)')
       .eq('id', id)
       .maybeSingle()
 
@@ -67,7 +67,8 @@ export async function POST(request: Request, ctx: RouteContext) {
     }
 
     const client = Array.isArray(quote.clients) ? quote.clients[0] : quote.clients
-    const recipientEmail = overrideEmail ?? client?.email ?? null
+    const company = Array.isArray(quote.companies) ? quote.companies[0] : quote.companies
+    const recipientEmail = overrideEmail ?? client?.email ?? company?.email ?? null
 
     if (!recipientEmail) {
       return NextResponse.json({ error: "Aucune adresse email destinataire — renseignez l'email du client ou saisissez-en un" }, { status: 400 })
