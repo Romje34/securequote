@@ -58,6 +58,17 @@ const EMPTY_ORG_FORM: OrgForm = {
   name: "", siret: "", address: "", postal_code: "", city: "", country: "France", phone: "", email: "",
 }
 
+type Plan = { id: string; name: string; monthly_credits: number; price: number }
+type Credits = {
+  organization: { id: string; name: string } | null
+  plan: Plan | null
+  monthly_credits: number
+  consumed: number
+  remaining: number
+  period_start: string
+  plans: Plan[]
+}
+
 export default function SettingsPage() {
   const [user, setUser] = useState<User | null>(null)
   const [branding, setBranding] = useState<Branding>(DEFAULTS)
@@ -71,6 +82,9 @@ export default function SettingsPage() {
   const [orgForm, setOrgForm]       = useState<OrgForm>(EMPTY_ORG_FORM)
   const [orgSaving, setOrgSaving]   = useState(false)
   const [orgMessage, setOrgMessage] = useState("")
+
+  const [credits, setCredits]       = useState<Credits | null>(null)
+  const [creditsLoaded, setCreditsLoaded] = useState(false)
   const logoRef = useRef<HTMLInputElement>(null)
   const headerRef = useRef<HTMLInputElement>(null)
   const signatureRef = useRef<HTMLInputElement>(null)
@@ -104,6 +118,10 @@ export default function SettingsPage() {
           }
         })
         .finally(() => setOrgLoaded(true))
+      fetch("/api/ai/credits")
+        .then(r => r.json())
+        .then(d => { if (d && !d.error) setCredits(d) })
+        .finally(() => setCreditsLoaded(true))
     })
   }, [])
 
@@ -286,6 +304,11 @@ export default function SettingsPage() {
               </div>
             )}
           </div>
+        )}
+
+        {/* Crédits IA */}
+        {creditsLoaded && credits?.organization && (
+          <CreditsCard credits={credits} primaryColor={branding.primary_color} />
         )}
 
         <div style={S.cols}>
@@ -500,6 +523,106 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function CreditsCard({ credits, primaryColor }: { credits: Credits; primaryColor: string }) {
+  const { plan, monthly_credits, consumed, remaining, plans } = credits
+  const pct = monthly_credits > 0 ? Math.min(100, Math.round((consumed / monthly_credits) * 100)) : 0
+  const accent = primaryColor || "#1a1a2e"
+  const low = remaining <= 0
+  const warn = !low && pct >= 80
+  const barColor = low ? "#dc2626" : warn ? "#f59e0b" : accent
+
+  const periodLabel = new Date(credits.period_start).toLocaleDateString("fr-FR", {
+    month: "long", year: "numeric",
+  })
+
+  return (
+    <div style={S.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <h2 style={S.cardTitle}>Crédits IA</h2>
+        <span style={{ fontSize: 12, color: "#94a3b8" }}>
+          Forfait actuel : <strong style={{ color: "#1a202c" }}>{plan?.name ?? "—"}</strong>
+          {plan ? ` · ${plan.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} € / mois` : ""}
+        </span>
+      </div>
+
+      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>
+        Période en cours : <strong>{periodLabel}</strong>. 1 crédit = 1 000 tokens. Le compteur est remis à zéro le 1er de chaque mois.
+      </div>
+
+      {/* Jauge */}
+      <div style={{ height: 12, borderRadius: 999, background: "#f1f5f9", overflow: "hidden", marginBottom: 10 }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: barColor, borderRadius: 999, transition: "width .3s" }} />
+      </div>
+
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: low || warn ? 14 : 0 }}>
+        <Stat label="Consommés" value={`${consumed.toLocaleString("fr-FR")} / ${monthly_credits.toLocaleString("fr-FR")}`} />
+        <Stat label="Restants" value={remaining.toLocaleString("fr-FR")} color={low ? "#dc2626" : "#166534"} />
+        <Stat label="Utilisation" value={`${pct} %`} />
+      </div>
+
+      {(low || warn) && (
+        <div style={{
+          fontSize: 13, borderRadius: 8, padding: "10px 14px",
+          background: low ? "#fef2f2" : "#fffbeb",
+          color:      low ? "#b91c1c" : "#92400e",
+          border: `1px solid ${low ? "#fca5a5" : "#fde68a"}`,
+        }}>
+          {low
+            ? "Vous avez épuisé vos crédits IA pour ce mois. Passez à un forfait supérieur pour continuer à générer des devis par IA."
+            : "Vous approchez de la limite mensuelle de votre forfait."}
+        </div>
+      )}
+
+      {/* Comparatif des forfaits */}
+      {plans.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 10 }}>Forfaits disponibles</div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {plans.map(p => {
+              const current = p.id === plan?.id
+              return (
+                <div key={p.id} style={{
+                  flex: "1 1 160px", minWidth: 150, borderRadius: 10, padding: "14px 16px",
+                  border: `1.5px solid ${current ? accent : "#e2e8f0"}`,
+                  background: current ? "#f8fafc" : "#fff",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>{p.name}</span>
+                    {current && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: accent, borderRadius: 999, padding: "2px 8px" }}>
+                        ACTUEL
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "#1a202c", marginTop: 6 }}>
+                    {p.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
+                    <span style={{ fontSize: 12, fontWeight: 500, color: "#94a3b8" }}> / mois</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                    {p.monthly_credits.toLocaleString("fr-FR")} crédits / mois
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 10 }}>
+            Pour changer de forfait, contactez votre administrateur.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: color ?? "#1a202c" }}>{value}</div>
     </div>
   )
 }

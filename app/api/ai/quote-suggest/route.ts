@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
+import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import Anthropic from '@anthropic-ai/sdk'
 
@@ -54,6 +55,50 @@ const CHAPTER_SCHEMA = {
   },
   required: ['items'],
   additionalProperties: false,
+}
+
+// Client service-role pour écrire le registre d'usage (RLS : insert réservé au backend).
+function adm() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  )
+}
+
+// Enregistre la consommation IA (best-effort : n'échoue jamais la requête).
+// 1 crédit = 1 000 tokens (entrée + sortie), arrondi au crédit supérieur.
+async function recordUsage(opts: {
+  userId: string
+  mode: string
+  quoteId: string | null
+  inputTokens: number
+  outputTokens: number
+}) {
+  try {
+    const db = adm()
+    const { data: profile } = await db
+      .from('profiles')
+      .select('organization_id')
+      .eq('id', opts.userId)
+      .single()
+    if (!profile?.organization_id) return
+
+    const total = opts.inputTokens + opts.outputTokens
+    const credits = Math.ceil(total / 1000)
+
+    await db.from('ai_usage').insert({
+      organization_id: profile.organization_id,
+      user_id: opts.userId,
+      quote_id: opts.quoteId,
+      mode: opts.mode === 'chapter' ? 'chapter' : 'full',
+      input_tokens: opts.inputTokens,
+      output_tokens: opts.outputTokens,
+      credits_consumed: credits,
+    })
+  } catch {
+    // Le registre d'usage ne doit pas bloquer la génération.
+  }
 }
 
 async function getSupabase() {
@@ -122,6 +167,15 @@ export async function POST(request: Request) {
 
     const text = message.content.find(b => b.type === 'text')?.text ?? ''
     const parsed = JSON.parse(text)
+
+    await recordUsage({
+      userId: user.id,
+      mode,
+      quoteId: typeof body.quote_id === 'string' ? body.quote_id : null,
+      inputTokens: message.usage?.input_tokens ?? 0,
+      outputTokens: message.usage?.output_tokens ?? 0,
+    })
+
     return NextResponse.json(parsed)
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Erreur IA'
