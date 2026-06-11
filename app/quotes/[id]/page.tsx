@@ -72,6 +72,56 @@ function fmtNum(n: number) {
   return `${sign}${int.replace(/\B(?=(\d{3})+(?!\d))/g, " ")},${dec}`
 }
 
+// Parse une saisie utilisateur (virgule FR ou point) en nombre.
+function parseNum(s: string): number {
+  if (typeof s !== "string") return Number(s) || 0
+  const v = parseFloat(s.replace(/\s/g, "").replace(",", "."))
+  return Number.isFinite(v) ? v : 0
+}
+
+// Affiche un nombre dans un champ éditable (virgule FR, sans forcer les décimales).
+function numToStr(n: number): string {
+  if (!Number.isFinite(n)) return ""
+  return String(n).replace(".", ",")
+}
+
+// Champ numérique : garde un brouillon texte pendant la frappe pour autoriser
+// la virgule et les décimales en cours (ex. "12," puis "12,50"), ne propage
+// qu'un nombre propre au parent.
+function NumInput({ value, onCommit, onBlur, style, placeholder, inputMode = "decimal" }: {
+  value:        number
+  onCommit:     (n: number) => void
+  onBlur?:      () => void
+  style?:       React.CSSProperties
+  placeholder?: string
+  inputMode?:   "decimal" | "numeric"
+}) {
+  const [draft, setDraft] = useState(() => numToStr(value))
+  const [focused, setFocused] = useState(false)
+
+  return (
+    <input
+      inputMode={inputMode}
+      value={focused ? draft : numToStr(value)}
+      placeholder={placeholder}
+      style={style}
+      onFocus={() => { setDraft(numToStr(value)); setFocused(true) }}
+      onChange={e => {
+        const cleaned = e.target.value.replace(/[^0-9.,]/g, "")
+        setDraft(cleaned)
+        onCommit(parseNum(cleaned))
+      }}
+      onBlur={() => {
+        setFocused(false)
+        const v = parseNum(draft)
+        setDraft(numToStr(v))
+        onCommit(v)
+        onBlur?.()
+      }}
+    />
+  )
+}
+
 function itemTotal(item: Item) {
   if (item.row_type !== "item") return 0
   return item.quantity * item.sell_price * (1 - item.discount / 100)
@@ -444,9 +494,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>TVA</label>
-              <input inputMode="decimal"
+              <NumInput
                 value={header.tva_rate}
-                onChange={e => updateHeader("tva_rate", parseFloat(e.target.value) || 0)}
+                onCommit={v => updateHeader("tva_rate", v)}
                 onBlur={() => saveHeader({ tva_rate: header.tva_rate })}
                 style={{ width: 64, padding: "5px 8px", border: "1px solid #e2e8f0", borderRadius: 6, fontSize: 13 }}
               />
@@ -729,7 +779,6 @@ function ItemRow({ item, alt, onChange, onBlur, onDelete, onSaveWith }: {
   onDelete:    () => void
   onSaveWith?: (patch: Partial<Item>) => void
 }) {
-  const n = (v: string) => parseFloat(v) || 0
   const total = itemTotal(item)
   const bg = alt ? "#fafbfc" : "#fff"
   const margePct = item.sell_price > 0 ? ((item.sell_price - item.buy_price) / item.sell_price) * 100 : 0
@@ -823,10 +872,9 @@ function ItemRow({ item, alt, onChange, onBlur, onDelete, onSaveWith }: {
             {/* Durée — masqué en Forfait */}
             {!isForfait && (
               <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-                <input
-                  inputMode="decimal"
+                <NumInput
                   value={item.quantity}
-                  onChange={e => onChange("quantity", n(e.target.value))}
+                  onCommit={v => onChange("quantity", v)}
                   onBlur={onBlur}
                   placeholder="0"
                   style={{ ...S.ci, width: 64, textAlign: "right", border: "1px solid #bfdbfe", borderRadius: 6, background: "#fff" }}
@@ -838,10 +886,9 @@ function ItemRow({ item, alt, onChange, onBlur, onDelete, onSaveWith }: {
             {/* Taux / Montant */}
             <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
               <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600, whiteSpace: "nowrap" }}>{tauxLabel}</span>
-              <input
-                inputMode="decimal"
+              <NumInput
                 value={item.sell_price}
-                onChange={e => onChange("sell_price", n(e.target.value))}
+                onCommit={v => onChange("sell_price", v)}
                 onBlur={onBlur}
                 style={{ ...S.ci, width: 86, textAlign: "right", fontWeight: 700, border: "1px solid #bfdbfe", borderRadius: 6, background: "#fff" }}
               />
@@ -886,23 +933,23 @@ function ItemRow({ item, alt, onChange, onBlur, onDelete, onSaveWith }: {
           placeholder="Marque" style={S.ci} />
       </td>
       <td style={{ ...S.td, textAlign: "right" }}>
-        <input inputMode="decimal" value={item.quantity}
-          onChange={e => onChange("quantity", n(e.target.value))} onBlur={onBlur}
+        <NumInput value={item.quantity}
+          onCommit={v => onChange("quantity", v)} onBlur={onBlur}
           style={{ ...S.ci, textAlign: "right" }} />
       </td>
       <td style={{ ...S.td, textAlign: "right", background: "#f8f9fb" }}>
-        <input inputMode="decimal" value={item.buy_price}
-          onChange={e => onChange("buy_price", n(e.target.value))} onBlur={onBlur}
+        <NumInput value={item.buy_price}
+          onCommit={v => onChange("buy_price", v)} onBlur={onBlur}
           style={{ ...S.ci, textAlign: "right", color: "#475569" }} />
       </td>
       <td style={{ ...S.td, textAlign: "right" }}>
-        <input inputMode="decimal" value={item.sell_price}
-          onChange={e => onChange("sell_price", n(e.target.value))} onBlur={onBlur}
+        <NumInput value={item.sell_price}
+          onCommit={v => onChange("sell_price", v)} onBlur={onBlur}
           style={{ ...S.ci, textAlign: "right", fontWeight: 600 }} />
       </td>
       <td style={{ ...S.td, textAlign: "right" }}>
-        <input inputMode="decimal" value={item.discount}
-          onChange={e => onChange("discount", n(e.target.value))} onBlur={onBlur}
+        <NumInput value={item.discount}
+          onCommit={v => onChange("discount", v)} onBlur={onBlur}
           style={{ ...S.ci, textAlign: "right", color: "#f59e0b" }} />
       </td>
       <td style={{ ...S.td, textAlign: "right", background: "#f8f9fb", paddingRight: 8, whiteSpace: "nowrap" }}>
