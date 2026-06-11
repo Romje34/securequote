@@ -147,6 +147,9 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [sendEmail, setSendEmail] = useState("")
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [aiGenOpen, setAiGenOpen] = useState(false)
+  const [aiGenDesc, setAiGenDesc] = useState("")
+  const [aiGenLoading, setAiGenLoading] = useState(false)
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000) }
 
@@ -273,6 +276,73 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       const body = await res.json().catch(() => ({}))
       showToast(`Erreur ligne : ${body.error ?? res.status}`)
       console.error("[addRow]", body)
+    }
+  }
+
+  // Génère un devis complet (chapitres + lignes) à partir d'une description libre.
+  async function generateFullQuote() {
+    const desc = aiGenDesc.trim()
+    if (!desc) return
+    setAiGenLoading(true)
+    try {
+      const res = await fetch("/api/ai/quote-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "full", description: desc }),
+      })
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}))
+        showToast(`Erreur IA : ${b.error ?? res.status}`)
+        return
+      }
+      const data = await res.json()
+
+      // Objet du devis : ne remplit que s'il est vide.
+      if (data.quote_object && header && !header.title.trim()) {
+        updateHeader("title", data.quote_object)
+        await saveHeader({ title: data.quote_object })
+      }
+
+      let chPos = chapters.length
+      for (const ch of (data.chapters ?? [])) {
+        const cres = await fetch(`/api/quotes/${id}/chapters`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: ch.title || "Chapitre", position: chPos++ }),
+        })
+        if (!cres.ok) continue
+        const created = await cres.json()
+
+        const items: Item[] = []
+        let pos = 0
+        for (const it of (ch.items ?? [])) {
+          const ires = await fetch(`/api/quotes/${id}/chapters/${created.id}/items`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              row_type:    "item",
+              position:    pos++,
+              designation: it.designation ?? "",
+              reference:   it.reference || null,
+              brand:       it.brand || null,
+              unit:        it.unit || "U",
+              quantity:    it.quantity ?? 1,
+              is_labor:    it.category === "main_oeuvre",
+              buy_price:   0,
+              sell_price:  0,
+              discount:    0,
+            }),
+          })
+          if (ires.ok) items.push({ ...(await ires.json()), row_type: "item" })
+        }
+        setChapters(prev => [...prev, { id: created.id, position: created.position, title: created.title, items }])
+      }
+
+      setAiGenOpen(false)
+      setAiGenDesc("")
+      showToast("Devis généré par l'IA ✦")
+    } finally {
+      setAiGenLoading(false)
     }
   }
 
@@ -533,6 +603,47 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
               chapterTotal={chapterTotal(ch)}
             />
           ))}
+
+          {/* ── Assistant IA : génération complète ── */}
+          <div style={{ border: "1px solid #ddd6fe", background: "linear-gradient(135deg,#faf5ff,#eef2ff)", borderRadius: 12, padding: 14 }}>
+            {!aiGenOpen ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 13, color: "#5b21b6", fontWeight: 600 }}>
+                  ✦ Laisse l&apos;IA structurer le devis à partir d&apos;une description du projet.
+                </span>
+                <button onClick={() => setAiGenOpen(true)} style={{
+                  marginLeft: "auto", padding: "8px 16px",
+                  background: "linear-gradient(135deg,#7c3aed,#4f46e5)", color: "#fff",
+                  border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700,
+                }}>
+                  Générer avec l&apos;IA
+                </button>
+              </div>
+            ) : (
+              <div>
+                <textarea
+                  autoFocus
+                  value={aiGenDesc}
+                  onChange={e => setAiGenDesc(e.target.value)}
+                  placeholder="Décris le projet : ex. « Vidéosurveillance entrepôt 2000 m², 20 caméras extérieures IP, contrôle d'accès 3 portes, alarme intrusion, réseau PoE »"
+                  rows={3}
+                  disabled={aiGenLoading}
+                  style={{ width: "100%", padding: "10px 12px", border: "1px solid #c4b5fd", borderRadius: 8, fontSize: 13, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box", outline: "none", background: "#fff" }}
+                />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8, alignItems: "center" }}>
+                  {aiGenLoading && <span style={{ fontSize: 12, color: "#6d28d9", marginRight: "auto" }}>Génération en cours, patiente quelques secondes…</span>}
+                  <button onClick={() => { setAiGenOpen(false); setAiGenDesc("") }} disabled={aiGenLoading}
+                    style={{ padding: "8px 16px", background: "#f1f5f9", color: "#374151", border: "none", borderRadius: 8, cursor: aiGenLoading ? "not-allowed" : "pointer", fontSize: 13 }}>
+                    Annuler
+                  </button>
+                  <button onClick={generateFullQuote} disabled={aiGenLoading || !aiGenDesc.trim()}
+                    style={{ padding: "8px 18px", background: aiGenLoading || !aiGenDesc.trim() ? "#a78bda" : "linear-gradient(135deg,#7c3aed,#4f46e5)", color: "#fff", border: "none", borderRadius: 8, cursor: aiGenLoading || !aiGenDesc.trim() ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700 }}>
+                    {aiGenLoading ? "Génération…" : "Générer ✦"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <div style={{ display: "flex", gap: 8 }}>
             <input
