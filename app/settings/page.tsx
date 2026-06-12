@@ -66,6 +66,8 @@ type Credits = {
   consumed: number
   remaining: number
   period_start: string
+  free_devis_used: number
+  free_devis_limit: number
   plans: Plan[]
 }
 
@@ -527,10 +529,85 @@ export default function SettingsPage() {
   )
 }
 
+// Grille des forfaits disponibles, réutilisée pour l'essai gratuit et un forfait actif.
+function PlansGrid({ plans, currentId, accent }: { plans: Plan[]; currentId: string | null; accent: string }) {
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 10 }}>Forfaits disponibles</div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {plans.map(p => {
+          const current = p.id === currentId
+          return (
+            <div key={p.id} style={{
+              flex: "1 1 160px", minWidth: 150, borderRadius: 10, padding: "14px 16px",
+              border: `1.5px solid ${current ? accent : "#e2e8f0"}`,
+              background: current ? "#f8fafc" : "#fff",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>{p.name}</span>
+                {current && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: accent, borderRadius: 999, padding: "2px 8px" }}>
+                    ACTUEL
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: "#1a202c", marginTop: 6 }}>
+                {p.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
+                <span style={{ fontSize: 12, fontWeight: 500, color: "#94a3b8" }}> / mois</span>
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                {p.monthly_credits.toLocaleString("fr-FR")} crédits / mois
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 10 }}>
+        Pour changer de forfait, contactez votre administrateur.
+      </div>
+    </div>
+  )
+}
+
 function CreditsCard({ credits, primaryColor }: { credits: Credits; primaryColor: string }) {
   const { plan, monthly_credits, consumed, remaining, plans } = credits
-  const pct = monthly_credits > 0 ? Math.min(100, Math.round((consumed / monthly_credits) * 100)) : 0
   const accent = primaryColor || "#1a1a2e"
+
+  // Essai gratuit : organisation sans forfait → jauge sur les 5 devis offerts.
+  if (!plan) {
+    const used = credits.free_devis_used ?? 0
+    const limit = credits.free_devis_limit ?? 5
+    const exhausted = used >= limit
+    const freePct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100))
+    return (
+      <div style={S.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+          <h2 style={S.cardTitle}>Crédits IA</h2>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 999, padding: "2px 10px" }}>
+            Essai gratuit
+          </span>
+        </div>
+        <div style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>
+          Profitez de <strong>{limit} devis générés par IA offerts</strong>. Souscrivez un forfait pour continuer ensuite.
+        </div>
+        <div style={{ height: 12, borderRadius: 999, background: "#f1f5f9", overflow: "hidden", marginBottom: 10 }}>
+          <div style={{ height: "100%", width: `${freePct}%`, background: exhausted ? "#dc2626" : accent, borderRadius: 999, transition: "width .3s" }} />
+        </div>
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: exhausted ? 14 : 0 }}>
+          <Stat label="Devis IA utilisés" value={`${used} / ${limit}`} />
+          <Stat label="Restants" value={`${Math.max(0, limit - used)}`} color={exhausted ? "#dc2626" : "#166534"} />
+        </div>
+        {exhausted && (
+          <div style={{ fontSize: 13, borderRadius: 8, padding: "10px 14px", background: "#fef2f2", color: "#b91c1c", border: "1px solid #fca5a5" }}>
+            Vous avez utilisé vos {limit} devis offerts. Choisissez un forfait ci-dessous pour continuer à générer par IA.
+          </div>
+        )}
+        {plans.length > 0 && <PlansGrid plans={plans} currentId={null} accent={accent} />}
+      </div>
+    )
+  }
+
+  const pct = monthly_credits > 0 ? Math.min(100, Math.round((consumed / monthly_credits) * 100)) : 0
   const low = remaining <= 0
   const warn = !low && pct >= 80
   const barColor = low ? "#dc2626" : warn ? "#f59e0b" : accent
@@ -577,43 +654,7 @@ function CreditsCard({ credits, primaryColor }: { credits: Credits; primaryColor
         </div>
       )}
 
-      {/* Comparatif des forfaits */}
-      {plans.length > 0 && (
-        <div style={{ marginTop: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 10 }}>Forfaits disponibles</div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {plans.map(p => {
-              const current = p.id === plan?.id
-              return (
-                <div key={p.id} style={{
-                  flex: "1 1 160px", minWidth: 150, borderRadius: 10, padding: "14px 16px",
-                  border: `1.5px solid ${current ? accent : "#e2e8f0"}`,
-                  background: current ? "#f8fafc" : "#fff",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>{p.name}</span>
-                    {current && (
-                      <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: accent, borderRadius: 999, padding: "2px 8px" }}>
-                        ACTUEL
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: "#1a202c", marginTop: 6 }}>
-                    {p.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
-                    <span style={{ fontSize: 12, fontWeight: 500, color: "#94a3b8" }}> / mois</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
-                    {p.monthly_credits.toLocaleString("fr-FR")} crédits / mois
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 10 }}>
-            Pour changer de forfait, contactez votre administrateur.
-          </div>
-        </div>
-      )}
+      {plans.length > 0 && <PlansGrid plans={plans} currentId={plan?.id ?? null} accent={accent} />}
     </div>
   )
 }

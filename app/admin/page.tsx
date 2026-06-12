@@ -6,34 +6,6 @@ import type { User } from "@supabase/supabase-js"
 
 const sb = createClient()
 
-type OrgDetails = {
-  name: string
-  siret: string | null
-  address: string | null
-  postal_code: string | null
-  city: string | null
-  country: string | null
-  phone: string | null
-  email: string | null
-}
-
-type Owner = {
-  id:                string
-  email:             string
-  created_at:        string
-  organization_id:   string | null
-  organization_name: string | null
-  organization_city: string | null
-  organization:      OrgDetails | null
-  company_count:     number
-  member_count:      number
-}
-
-const EMPTY_ORG_FORM = {
-  company_name: "", siret: "", address: "", postal_code: "",
-  city: "", country: "France", phone: "", company_email: "",
-}
-
 // Grille tarifaire des forfaits IA (figée — reflète le seed public.plans).
 const AI_PLANS = [
   { name: "Essentiel", credits: 100,  price: 19 },
@@ -41,30 +13,39 @@ const AI_PLANS = [
   { name: "Business",  credits: 1500, price: 129 },
 ]
 
+type Plan = { id: string; name: string; monthly_credits: number; price: number }
+type Member = { id: string; email: string; role: "owner" | "member"; created_at: string; consumed_credits: number }
+type Org = {
+  id: string
+  name: string
+  city: string | null
+  plan: Plan | null
+  plan_id: string | null
+  free_devis_used: number
+  free_devis_limit: number
+  members: Member[]
+}
+type OrgData = { organizations: Org[]; orphan_members: Member[]; plans: Plan[] }
+
 export default function AdminPage() {
-  const [user,          setUser]          = useState<User | null>(null)
-  const [isSuperAdmin,  setIsSuperAdmin]  = useState<boolean | null>(null)
-  const [owners,        setOwners]        = useState<Owner[]>([])
-  const [loading,       setLoading]       = useState(false)
-  const [message,       setMessage]       = useState("")
+  const [user,         setUser]         = useState<User | null>(null)
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean | null>(null)
+  const [data,         setData]         = useState<OrgData>({ organizations: [], orphan_members: [], plans: [] })
+  const [loading,      setLoading]      = useState(false)
+  const [message,      setMessage]      = useState("")
+  const [busyId,       setBusyId]       = useState<string | null>(null)
 
-  // Formulaire
-  const [email,         setEmail]         = useState("")
-  const [password,      setPassword]      = useState("")
-  const [companyName,   setCompanyName]   = useState("")
-  const [siret,         setSiret]         = useState("")
-  const [address,       setAddress]       = useState("")
-  const [postalCode,    setPostalCode]    = useState("")
-  const [city,          setCity]          = useState("")
-  const [country,       setCountry]       = useState("France")
-  const [phone,         setPhone]         = useState("")
-  const [companyEmail,  setCompanyEmail]  = useState("")
-
-  // Modale d'édition de société
-  const [orgEditTarget, setOrgEditTarget] = useState<Owner | null>(null)
-  const [orgForm,       setOrgForm]       = useState(EMPTY_ORG_FORM)
-  const [orgSaving,     setOrgSaving]     = useState(false)
-  const [orgError,      setOrgError]      = useState("")
+  // Formulaire création owner
+  const [email,        setEmail]        = useState("")
+  const [password,     setPassword]     = useState("")
+  const [companyName,  setCompanyName]  = useState("")
+  const [siret,        setSiret]        = useState("")
+  const [address,      setAddress]      = useState("")
+  const [postalCode,   setPostalCode]   = useState("")
+  const [city,         setCity]         = useState("")
+  const [country,      setCountry]      = useState("France")
+  const [phone,        setPhone]        = useState("")
+  const [companyEmail, setCompanyEmail] = useState("")
 
   useEffect(() => {
     sb.auth.getUser().then(({ data }) => {
@@ -75,7 +56,7 @@ export default function AdminPage() {
           .then(({ data: p }) => {
             const isAdmin = p?.user_type === "superadmin"
             setIsSuperAdmin(isAdmin)
-            if (isAdmin) fetchOwners()
+            if (isAdmin) fetchOrgs()
           })
       } else {
         setIsSuperAdmin(false)
@@ -87,9 +68,9 @@ export default function AdminPage() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  async function fetchOwners() {
-    const res = await fetch("/api/admin/owners")
-    if (res.ok) setOwners(await res.json())
+  async function fetchOrgs() {
+    const res = await fetch("/api/admin/organizations")
+    if (res.ok) setData(await res.json())
   }
 
   function resetForm() {
@@ -119,83 +100,58 @@ export default function AdminPage() {
         company_email: companyEmail || null,
       }),
     })
-    const data = await res.json()
+    const d = await res.json()
     if (!res.ok) {
-      setMessage(data.error ?? `Erreur HTTP ${res.status}`)
-    } else if (data.upgraded) {
-      setMessage(`Compte existant promu owner — ${data.email} (${data.organization_name})`)
-      resetForm()
-      fetchOwners()
+      setMessage(d.error ?? `Erreur HTTP ${res.status}`)
+    } else if (d.upgraded) {
+      setMessage(`Compte existant promu owner — ${d.email} (${d.organization_name})`)
+      resetForm(); fetchOrgs()
     } else {
-      setMessage(`Owner créé — ${data.email} · ${data.organization_name}`)
-      resetForm()
-      fetchOwners()
+      setMessage(`Owner créé — ${d.email} · ${d.organization_name}`)
+      resetForm(); fetchOrgs()
     }
     setLoading(false)
   }
 
-  async function handleDelete(userId: string, ownerEmail: string, orgName: string | null) {
-    const label = orgName ? `"${ownerEmail}" (${orgName})` : `"${ownerEmail}"`
-    if (!confirm(`Supprimer le compte owner ${label} ? Cette action est irréversible.`)) return
+  async function changeRole(m: Member) {
+    const nextRole = m.role === "owner" ? "member" : "owner"
+    const verb = nextRole === "owner" ? "passer owner" : "passer membre"
+    if (!confirm(`Voulez-vous ${verb} le compte « ${m.email} » ?`)) return
+    setBusyId(m.id)
+    const res = await fetch("/api/admin/role", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: m.id, role: nextRole }),
+    })
+    if (res.ok) await fetchOrgs()
+    else setMessage("Erreur : " + ((await res.json().catch(() => ({}))).error ?? "inconnue"))
+    setBusyId(null)
+  }
+
+  async function changePlan(org: Org, planId: string) {
+    setBusyId(org.id)
+    const res = await fetch("/api/admin/plan", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ organization_id: org.id, plan_id: planId || null }),
+    })
+    if (res.ok) await fetchOrgs()
+    else setMessage("Erreur : " + ((await res.json().catch(() => ({}))).error ?? "inconnue"))
+    setBusyId(null)
+  }
+
+  async function deleteAccount(m: Member) {
+    const label = m.role === "owner" ? "owner" : "membre"
+    if (!confirm(`Supprimer le compte ${label} « ${m.email} » ? Cette action est irréversible.`)) return
+    setBusyId(m.id)
     const res = await fetch("/api/admin/owners", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
+      body: JSON.stringify({ user_id: m.id }),
     })
-    if (res.ok) fetchOwners()
-    else {
-      const data = await res.json()
-      setMessage("Erreur : " + (data.error ?? "inconnue"))
-    }
-  }
-
-  function openOrgEdit(owner: Owner) {
-    const org = owner.organization
-    setOrgForm({
-      company_name:  org?.name        ?? "",
-      siret:         org?.siret       ?? "",
-      address:       org?.address     ?? "",
-      postal_code:   org?.postal_code ?? "",
-      city:          org?.city        ?? "",
-      country:       org?.country     ?? "France",
-      phone:         org?.phone       ?? "",
-      company_email: org?.email       ?? "",
-    })
-    setOrgError("")
-    setOrgEditTarget(owner)
-  }
-
-  async function handleSaveOrg() {
-    if (!orgEditTarget) return
-    if (!orgForm.company_name.trim()) { setOrgError("La raison sociale est obligatoire"); return }
-    setOrgError("")
-    setOrgSaving(true)
-    try {
-      const res = await fetch("/api/admin/owners", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id:       orgEditTarget.id,
-          company_name:  orgForm.company_name,
-          siret:         orgForm.siret         || null,
-          address:       orgForm.address       || null,
-          postal_code:   orgForm.postal_code   || null,
-          city:          orgForm.city          || null,
-          country:       orgForm.country       || "France",
-          phone:         orgForm.phone         || null,
-          company_email: orgForm.company_email || null,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? "Erreur lors de l'enregistrement")
-      setOrgEditTarget(null)
-      setMessage(`Société mise à jour pour ${orgEditTarget.email} — ${data.organization_name}`)
-      fetchOwners()
-    } catch (e) {
-      setOrgError(e instanceof Error ? e.message : "Erreur lors de l'enregistrement")
-    } finally {
-      setOrgSaving(false)
-    }
+    if (res.ok) await fetchOrgs()
+    else setMessage("Erreur : " + ((await res.json().catch(() => ({}))).error ?? "inconnue"))
+    setBusyId(null)
   }
 
   if (isSuperAdmin === null) return (
@@ -216,6 +172,7 @@ export default function AdminPage() {
   )
 
   const displayName = user.email?.split("@")[0] ?? "—"
+  const orgCount = data.organizations.length
 
   return (
     <div style={S.page}>
@@ -236,16 +193,15 @@ export default function AdminPage() {
       </header>
 
       <div style={S.container}>
-        <h1 style={S.pageTitle}>Administration — Comptes owners</h1>
+        <h1 style={S.pageTitle}>Administration — Organisations</h1>
 
         <div style={S.grid}>
 
-          {/* ── Formulaire création ── */}
+          {/* ── Colonne gauche : création + tarifs ── */}
           <div style={{ flex: "0 0 320px" }}>
             <div style={S.card}>
               <h2 style={S.cardTitle}>Créer un owner</h2>
 
-              {/* Accès */}
               <div style={S.sectionLabel}>Accès</div>
               <label style={S.label}>Email <span style={S.required}>*</span></label>
               <input type="email" placeholder="owner@exemple.com" value={email} onChange={e => setEmail(e.target.value)}
@@ -254,7 +210,6 @@ export default function AdminPage() {
               <input type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)}
                 style={S.input} autoComplete="new-password" />
 
-              {/* Société */}
               <div style={{ ...S.sectionLabel, marginTop: 16 }}>Société <span style={S.required}>*</span></div>
               <label style={S.label}>Raison sociale <span style={S.required}>*</span></label>
               <input type="text" placeholder="SARL Example Sécurité" value={companyName} onChange={e => setCompanyName(e.target.value)}
@@ -266,32 +221,26 @@ export default function AdminPage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 10px" }}>
                 <div>
                   <label style={S.label}>Adresse</label>
-                  <input type="text" placeholder="12 rue de la Paix" value={address} onChange={e => setAddress(e.target.value)}
-                    style={S.input} />
+                  <input type="text" placeholder="12 rue de la Paix" value={address} onChange={e => setAddress(e.target.value)} style={S.input} />
                 </div>
                 <div>
                   <label style={S.label}>Code postal</label>
-                  <input type="text" placeholder="75001" value={postalCode} onChange={e => setPostalCode(e.target.value)}
-                    style={S.input} />
+                  <input type="text" placeholder="75001" value={postalCode} onChange={e => setPostalCode(e.target.value)} style={S.input} />
                 </div>
                 <div>
                   <label style={S.label}>Ville</label>
-                  <input type="text" placeholder="Paris" value={city} onChange={e => setCity(e.target.value)}
-                    style={S.input} />
+                  <input type="text" placeholder="Paris" value={city} onChange={e => setCity(e.target.value)} style={S.input} />
                 </div>
                 <div>
                   <label style={S.label}>Pays</label>
-                  <input type="text" placeholder="France" value={country} onChange={e => setCountry(e.target.value)}
-                    style={S.input} />
+                  <input type="text" placeholder="France" value={country} onChange={e => setCountry(e.target.value)} style={S.input} />
                 </div>
               </div>
 
               <label style={S.label}>Téléphone</label>
-              <input type="tel" placeholder="+33 1 23 45 67 89" value={phone} onChange={e => setPhone(e.target.value)}
-                style={S.input} />
+              <input type="tel" placeholder="+33 1 23 45 67 89" value={phone} onChange={e => setPhone(e.target.value)} style={S.input} />
               <label style={S.label}>Email société</label>
-              <input type="email" placeholder="contact@exemple.com" value={companyEmail} onChange={e => setCompanyEmail(e.target.value)}
-                style={S.input} />
+              <input type="email" placeholder="contact@exemple.com" value={companyEmail} onChange={e => setCompanyEmail(e.target.value)} style={S.input} />
 
               <button onClick={handleCreate} disabled={loading}
                 style={{ ...S.btnCreate, opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}>
@@ -318,9 +267,7 @@ export default function AdminPage() {
                   {AI_PLANS.map(p => (
                     <tr key={p.name}>
                       <td style={{ ...S.planTd, fontWeight: 700, color: "#1a202c" }}>{p.name}</td>
-                      <td style={{ ...S.planTd, textAlign: "center" }}>
-                        {p.credits.toLocaleString("fr-FR")}
-                      </td>
+                      <td style={{ ...S.planTd, textAlign: "center" }}>{p.credits.toLocaleString("fr-FR")}</td>
                       <td style={{ ...S.planTd, textAlign: "right", fontWeight: 600 }}>
                         {p.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
                       </td>
@@ -331,118 +278,140 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* ── Liste des owners ── */}
+          {/* ── Colonne droite : organisations actives ── */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={S.sectionHeader}>
-              Owners actifs — {owners.length} compte{owners.length !== 1 ? "s" : ""}
+              Organisations actives — {orgCount} organisation{orgCount !== 1 ? "s" : ""}
             </div>
 
-            {owners.length === 0 ? (
-              <div style={S.emptyCard}>Aucun owner pour l&apos;instant</div>
+            {orgCount === 0 ? (
+              <div style={S.emptyCard}>Aucune organisation pour l&apos;instant</div>
             ) : (
-              owners.map((o, i) => (
-                <div key={o.id} style={{ ...S.ownerRow, borderRadius: i === owners.length - 1 ? "0 0 8px 8px" : 0 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={S.ownerEmail}>{o.email}</div>
-                    {o.organization_name && (
-                      <div style={S.orgName}>
-                        🏢 {o.organization_name}{o.organization_city ? ` · ${o.organization_city}` : ""}
-                      </div>
-                    )}
-                    {!o.organization_name && (
-                      <div style={{ fontSize: 11, color: "#f59e0b", fontStyle: "italic", marginBottom: 4 }}>
-                        Société non renseignée
-                      </div>
-                    )}
-                    <div style={S.ownerMeta}>
-                      <span style={S.statChip}>{o.company_count} client{o.company_count !== 1 ? "s" : ""}</span>
-                      <span style={S.statChip}>{o.member_count} membre{o.member_count !== 1 ? "s" : ""}</span>
-                      <span style={{ fontSize: 11, color: "#94a3b8" }}>
-                        Créé le {new Date(o.created_at).toLocaleDateString("fr-FR")}
-                      </span>
-                    </div>
-                  </div>
-                  <button onClick={() => openOrgEdit(o)} style={S.btnOrgEdit}>
-                    {o.organization_name ? "✎ Modifier société" : "🏢 Renseigner société"}
-                  </button>
-                  <button onClick={() => handleDelete(o.id, o.email, o.organization_name)}
-                    style={S.btnDelete} title="Supprimer ce owner">×</button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 14 }}>
+                {data.organizations.map(org => (
+                  <OrgCard
+                    key={org.id}
+                    org={org}
+                    plans={data.plans}
+                    busyId={busyId}
+                    onChangeRole={changeRole}
+                    onChangePlan={changePlan}
+                    onDelete={deleteAccount}
+                  />
+                ))}
+              </div>
+            )}
+
+            {data.orphan_members.length > 0 && (
+              <div style={{ marginTop: 22 }}>
+                <div style={{ ...S.sectionHeader, background: "#475569" }}>
+                  Comptes sans organisation — {data.orphan_members.length}
                 </div>
-              ))
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderTop: "none", borderRadius: "0 0 8px 8px" }}>
+                  {data.orphan_members.map(m => (
+                    <MemberRow key={m.id} m={m} plan={null} busyId={busyId}
+                      onChangeRole={changeRole} onDelete={deleteAccount} />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </div>
       </div>
+    </div>
+  )
+}
 
-      {/* Modale édition / attachement de société */}
-      {orgEditTarget && (
-        <div
-          onClick={() => !orgSaving && setOrgEditTarget(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-        >
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "26px 28px", width: 460, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto" }}>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "#1a202c", marginBottom: 4 }}>
-              {orgEditTarget.organization_name ? "✎ Modifier la société" : "🏢 Renseigner la société"}
-            </div>
-            <div style={{ fontSize: 13, color: "#64748b", marginBottom: 18 }}>
-              Compte : <strong>{orgEditTarget.email}</strong>
-            </div>
-
-            <label style={S.label}>Raison sociale <span style={S.required}>*</span></label>
-            <input type="text" placeholder="SARL Example Sécurité" value={orgForm.company_name}
-              onChange={e => setOrgForm(f => ({ ...f, company_name: e.target.value }))}
-              style={{ ...S.input, borderColor: !orgForm.company_name ? "#fca5a5" : "#e2e8f0" }} />
-
-            <label style={S.label}>SIRET</label>
-            <input type="text" placeholder="123 456 789 00012" value={orgForm.siret}
-              onChange={e => setOrgForm(f => ({ ...f, siret: e.target.value }))} style={S.input} />
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 10px" }}>
-              <div>
-                <label style={S.label}>Adresse</label>
-                <input type="text" placeholder="12 rue de la Paix" value={orgForm.address}
-                  onChange={e => setOrgForm(f => ({ ...f, address: e.target.value }))} style={S.input} />
-              </div>
-              <div>
-                <label style={S.label}>Code postal</label>
-                <input type="text" placeholder="75001" value={orgForm.postal_code}
-                  onChange={e => setOrgForm(f => ({ ...f, postal_code: e.target.value }))} style={S.input} />
-              </div>
-              <div>
-                <label style={S.label}>Ville</label>
-                <input type="text" placeholder="Paris" value={orgForm.city}
-                  onChange={e => setOrgForm(f => ({ ...f, city: e.target.value }))} style={S.input} />
-              </div>
-              <div>
-                <label style={S.label}>Pays</label>
-                <input type="text" placeholder="France" value={orgForm.country}
-                  onChange={e => setOrgForm(f => ({ ...f, country: e.target.value }))} style={S.input} />
-              </div>
-            </div>
-
-            <label style={S.label}>Téléphone</label>
-            <input type="tel" placeholder="+33 1 23 45 67 89" value={orgForm.phone}
-              onChange={e => setOrgForm(f => ({ ...f, phone: e.target.value }))} style={S.input} />
-
-            <label style={S.label}>Email société</label>
-            <input type="email" placeholder="contact@exemple.com" value={orgForm.company_email}
-              onChange={e => setOrgForm(f => ({ ...f, company_email: e.target.value }))} style={S.input} />
-
-            {orgError && <div style={{ fontSize: 12, color: "#dc2626", margin: "4px 0 10px" }}>{orgError}</div>}
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-              <button onClick={() => setOrgEditTarget(null)} disabled={orgSaving}
-                style={{ padding: "10px 18px", background: "#f1f5f9", color: "#475569", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                Annuler
-              </button>
-              <button onClick={handleSaveOrg} disabled={orgSaving}
-                style={{ padding: "10px 22px", background: orgSaving ? "#94a3b8" : "#dc2626", color: "#fff", border: "none", borderRadius: 8, cursor: orgSaving ? "default" : "pointer", fontSize: 13, fontWeight: 700 }}>
-                {orgSaving ? "Enregistrement…" : "Enregistrer →"}
-              </button>
-            </div>
+function OrgCard({ org, plans, busyId, onChangeRole, onChangePlan, onDelete }: {
+  org: Org
+  plans: Plan[]
+  busyId: string | null
+  onChangeRole: (m: Member) => void
+  onChangePlan: (org: Org, planId: string) => void
+  onDelete: (m: Member) => void
+}) {
+  const trialPct = Math.min(100, Math.round((org.free_devis_used / Math.max(1, org.free_devis_limit)) * 100))
+  return (
+    <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", overflow: "hidden" }}>
+      {/* En-tête organisation */}
+      <div style={{ background: "#1a1a2e", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>
+            🏢 {org.name}{org.city ? <span style={{ color: "#94a3b8", fontWeight: 500 }}> · {org.city}</span> : null}
+          </div>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>
+            {org.members.length} compte{org.members.length !== 1 ? "s" : ""}
           </div>
         </div>
-      )}
+
+        {/* Forfait / essai gratuit */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {org.plan ? (
+            <span style={S.planBadge}>{org.plan.name} · {org.plan.monthly_credits.toLocaleString("fr-FR")} cr.</span>
+          ) : (
+            <span style={S.trialBadge} title={`${trialPct}% de l'essai utilisé`}>
+              Essai gratuit · {org.free_devis_used}/{org.free_devis_limit} devis
+            </span>
+          )}
+          <select
+            value={org.plan_id ?? ""}
+            disabled={busyId === org.id}
+            onChange={e => onChangePlan(org, e.target.value)}
+            style={S.planSelect}
+            title="Attribuer / changer le forfait"
+          >
+            <option value="">Essai gratuit (aucun)</option>
+            {plans.map(p => (
+              <option key={p.id} value={p.id}>{p.name} — {p.monthly_credits} cr.</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Comptes : owners puis membres */}
+      <div>
+        {org.members.length === 0 ? (
+          <div style={{ padding: "14px 16px", color: "#94a3b8", fontSize: 13 }}>Aucun compte rattaché.</div>
+        ) : (
+          org.members.map(m => (
+            <MemberRow key={m.id} m={m} plan={org.plan} busyId={busyId}
+              onChangeRole={onChangeRole} onDelete={onDelete} />
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MemberRow({ m, plan, busyId, onChangeRole, onDelete }: {
+  m: Member
+  plan: Plan | null
+  busyId: string | null
+  onChangeRole: (m: Member) => void
+  onDelete: (m: Member) => void
+}) {
+  const isOwner = m.role === "owner"
+  const busy = busyId === m.id
+  return (
+    <div style={S.accRow}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 14, color: "#1a202c", fontWeight: 600 }}>{m.email}</span>
+          <span style={isOwner ? S.roleOwner : S.roleMember}>{isOwner ? "Owner" : "Membre"}</span>
+        </div>
+        <div style={S.accMeta}>
+          <span style={S.chip}>Forfait : {plan?.name ?? "Essai gratuit"}</span>
+          <span style={S.chip}>Conso : {m.consumed_credits.toLocaleString("fr-FR")} cr.</span>
+          <span style={{ fontSize: 11, color: "#94a3b8" }}>Créé le {new Date(m.created_at).toLocaleDateString("fr-FR")}</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <button onClick={() => onChangeRole(m)} disabled={busy}
+          style={isOwner ? S.btnToMember : S.btnToOwner} title={isOwner ? "Retirer les droits owner" : "Donner les droits owner"}>
+          {busy ? "…" : isOwner ? "↓ Passer membre" : "↑ Passer owner"}
+        </button>
+        <button onClick={() => onDelete(m)} disabled={busy} style={S.btnDelete} title="Supprimer ce compte">×</button>
+      </div>
     </div>
   )
 }
@@ -479,7 +448,6 @@ const S = {
     borderRadius: 4, padding: "2px 8px",
   } as React.CSSProperties,
   nav: { display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" as const },
-  navLink: { color: "#93c5fd", fontSize: 13, textDecoration: "none", fontWeight: 500 },
   btnLogout: {
     padding: "6px 14px", background: "transparent", color: "#94a3b8",
     border: "1px solid #334155", borderRadius: 6, cursor: "pointer", fontSize: 13,
@@ -509,40 +477,56 @@ const S = {
     background: "#1a1a2e", color: "#fff", padding: "10px 16px",
     borderRadius: "8px 8px 0 0", fontWeight: 700, fontSize: 14,
   } as React.CSSProperties,
-  ownerRow: {
-    background: "#fff", padding: "14px 16px", display: "flex",
-    alignItems: "flex-start", gap: 12, border: "1px solid #e2e8f0", borderTop: "none",
-  } as React.CSSProperties,
-  ownerEmail: { fontSize: 14, color: "#1a202c", fontWeight: 600, marginBottom: 3 },
-  orgName:    { fontSize: 13, color: "#1d4ed8", fontWeight: 600, marginBottom: 5 },
-  ownerMeta: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const },
-  statChip: {
-    fontSize: 11, color: "#374151", background: "#f1f5f9",
-    border: "1px solid #e2e8f0", borderRadius: 4, padding: "2px 8px",
-  } as React.CSSProperties,
-  btnDelete: {
-    background: "none", border: "none", cursor: "pointer",
-    color: "#ef4444", fontWeight: 700, fontSize: 20, lineHeight: 1,
-    padding: "0 4px", flexShrink: 0,
-  } as React.CSSProperties,
-  btnOrgEdit: {
-    background: "#eff6ff", border: "1px solid #bfdbfe", cursor: "pointer",
-    color: "#1d4ed8", fontWeight: 600, fontSize: 12, lineHeight: 1,
-    padding: "6px 12px", borderRadius: 6, flexShrink: 0, whiteSpace: "nowrap",
-  } as React.CSSProperties,
   emptyCard: {
     background: "#fff", padding: "16px", border: "1px solid #e2e8f0",
     borderTop: "none", borderRadius: "0 0 8px 8px", color: "#94a3b8", fontSize: 13,
   } as React.CSSProperties,
-  planTable: {
-    width: "100%", borderCollapse: "collapse" as const, fontSize: 13,
+  // Lignes de compte
+  accRow: {
+    padding: "12px 16px", display: "flex", alignItems: "flex-start", gap: 12,
+    borderTop: "1px solid #f1f5f9",
   } as React.CSSProperties,
+  accMeta: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const, marginTop: 5 },
+  chip: {
+    fontSize: 11, color: "#374151", background: "#f1f5f9",
+    border: "1px solid #e2e8f0", borderRadius: 4, padding: "2px 8px",
+  } as React.CSSProperties,
+  roleOwner: {
+    fontSize: 10, fontWeight: 800, color: "#1d4ed8", background: "#eff6ff",
+    border: "1px solid #bfdbfe", borderRadius: 4, padding: "1px 7px", textTransform: "uppercase" as const, letterSpacing: 0.4,
+  } as React.CSSProperties,
+  roleMember: {
+    fontSize: 10, fontWeight: 800, color: "#7c4dab", background: "#f7f1fc",
+    border: "1px solid #e3d4f5", borderRadius: 4, padding: "1px 7px", textTransform: "uppercase" as const, letterSpacing: 0.4,
+  } as React.CSSProperties,
+  planBadge: {
+    fontSize: 11, fontWeight: 700, color: "#a7f3d0", background: "rgba(16,185,129,0.15)",
+    border: "1px solid rgba(16,185,129,0.4)", borderRadius: 4, padding: "3px 9px", whiteSpace: "nowrap" as const,
+  } as React.CSSProperties,
+  trialBadge: {
+    fontSize: 11, fontWeight: 700, color: "#fcd34d", background: "rgba(245,158,11,0.15)",
+    border: "1px solid rgba(245,158,11,0.4)", borderRadius: 4, padding: "3px 9px", whiteSpace: "nowrap" as const,
+  } as React.CSSProperties,
+  planSelect: {
+    fontSize: 12, padding: "5px 8px", borderRadius: 6, border: "1px solid #334155",
+    background: "#0f172a", color: "#e2e8f0", outline: "none", cursor: "pointer", maxWidth: 200,
+  } as React.CSSProperties,
+  btnToOwner: {
+    background: "#eff6ff", border: "1px solid #bfdbfe", cursor: "pointer",
+    color: "#1d4ed8", fontWeight: 700, fontSize: 12, padding: "6px 11px", borderRadius: 6, whiteSpace: "nowrap" as const,
+  } as React.CSSProperties,
+  btnToMember: {
+    background: "#fef9f3", border: "1px solid #f5d4b8", cursor: "pointer",
+    color: "#b45309", fontWeight: 700, fontSize: 12, padding: "6px 11px", borderRadius: 6, whiteSpace: "nowrap" as const,
+  } as React.CSSProperties,
+  btnDelete: {
+    background: "none", border: "none", cursor: "pointer",
+    color: "#ef4444", fontWeight: 700, fontSize: 20, lineHeight: 1, padding: "0 4px",
+  } as React.CSSProperties,
+  planTable: { width: "100%", borderCollapse: "collapse" as const, fontSize: 13 } as React.CSSProperties,
   planTh: {
     fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" as const,
-    letterSpacing: 0.4, textAlign: "center" as const, padding: "0 0 8px",
-    borderBottom: "1px solid #e2e8f0",
+    letterSpacing: 0.4, textAlign: "center" as const, padding: "0 0 8px", borderBottom: "1px solid #e2e8f0",
   } as React.CSSProperties,
-  planTd: {
-    padding: "10px 0", color: "#374151", borderBottom: "1px solid #f1f5f9",
-  } as React.CSSProperties,
+  planTd: { padding: "10px 0", color: "#374151", borderBottom: "1px solid #f1f5f9" } as React.CSSProperties,
 }

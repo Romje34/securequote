@@ -66,6 +66,72 @@ function adm() {
   )
 }
 
+// Essai gratuit : nombre de générations complètes offertes à une org sans forfait.
+const FREE_DEVIS_LIMIT = 5
+
+// Premier jour du mois calendaire courant (UTC) — borne de remise à zéro de la conso.
+function startOfMonthISO() {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+}
+
+// Contrôle de quota IA avant génération.
+// Renvoie une réponse 402 (avec la liste des forfaits) si l'essai gratuit est épuisé
+// ou si le forfait n'a plus de crédits ce mois-ci ; sinon null (génération autorisée).
+async function quotaBlock(userId: string): Promise<NextResponse | null> {
+  const db = adm()
+  const { data: profile } = await db
+    .from('profiles')
+    .select('organization_id')
+    .eq('id', userId)
+    .single()
+
+  const orgId = profile?.organization_id
+  if (!orgId) return null // pas d'org → pas de quota (compte legacy)
+
+  const { data: org } = await db
+    .from('organizations')
+    .select('plan_id, plan:plan_id ( monthly_credits )')
+    .eq('id', orgId)
+    .maybeSingle()
+
+  const fetchPlans = async () =>
+    (await db.from('plans').select('id, name, monthly_credits, price, sort_order').order('sort_order', { ascending: true })).data ?? []
+
+  if (!org?.plan_id) {
+    // Essai gratuit : compter les générations complètes (à vie).
+    const { count } = await db
+      .from('ai_usage')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', orgId)
+      .eq('mode', 'full')
+    if ((count ?? 0) >= FREE_DEVIS_LIMIT) {
+      return NextResponse.json(
+        { error: 'Essai gratuit épuisé', error_code: 'trial_exhausted', plans: await fetchPlans() },
+        { status: 402 }
+      )
+    }
+    return null
+  }
+
+  // Forfait : vérifier la consommation du mois courant.
+  const plan = (org.plan ?? null) as unknown as { monthly_credits: number } | null
+  const monthly = plan?.monthly_credits ?? 0
+  const { data: usage } = await db
+    .from('ai_usage')
+    .select('credits_consumed')
+    .eq('organization_id', orgId)
+    .gte('created_at', startOfMonthISO())
+  const consumed = (usage ?? []).reduce((s, r) => s + (r.credits_consumed ?? 0), 0)
+  if (consumed >= monthly) {
+    return NextResponse.json(
+      { error: 'Crédits IA épuisés', error_code: 'insufficient_credits', plans: await fetchPlans() },
+      { status: 402 }
+    )
+  }
+  return null
+}
+
 // Enregistre la consommation IA (best-effort : n'échoue jamais la requête).
 // 1 crédit = 1 000 tokens (entrée + sortie), arrondi au crédit supérieur.
 async function recordUsage(opts: {
@@ -130,6 +196,10 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}))
   const mode: string = body.mode ?? 'full'
+
+  // Quota : essai gratuit (5 devis) ou crédits du forfait. Bloque avant de consommer l'API.
+  const blocked = await quotaBlock(user.id)
+  if (blocked) return blocked
 
   let userPrompt: string
   let schema: Record<string, unknown>

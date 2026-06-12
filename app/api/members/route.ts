@@ -37,10 +37,22 @@ export async function GET() {
 
     const db = adm()
 
+    // Seul un owner (integrator) supervise les membres ; la liste couvre toute l'organisation.
+    const { data: caller } = await db
+      .from('profiles')
+      .select('user_type, organization_id')
+      .eq('id', user.id)
+      .single()
+
+    if (caller?.user_type !== 'integrator' || !caller.organization_id) {
+      return NextResponse.json([])
+    }
+
     const { data: members, error } = await db
       .from('profiles')
       .select('id, email')
-      .eq('invited_by', user.id)
+      .eq('organization_id', caller.organization_id)
+      .eq('user_type', 'client')
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     if (!members || members.length === 0) return NextResponse.json([])
@@ -183,17 +195,20 @@ export async function DELETE(request: Request) {
     const { user_id } = await request.json()
     if (!user_id) return NextResponse.json({ error: 'user_id requis' }, { status: 400 })
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('invited_by')
-      .eq('id', user_id)
-      .single()
+    const db = adm()
 
-    if (!profile || profile.invited_by !== user.id) {
+    // Autorisation : le caller doit être owner (integrator) de la même organisation que la cible.
+    const [{ data: caller }, { data: target }] = await Promise.all([
+      db.from('profiles').select('user_type, organization_id').eq('id', user.id).single(),
+      db.from('profiles').select('user_type, organization_id').eq('id', user_id).single(),
+    ])
+
+    if (caller?.user_type !== 'integrator' || !caller.organization_id) {
       return NextResponse.json({ error: 'non autorisé' }, { status: 403 })
     }
-
-    const db = adm()
+    if (!target || target.organization_id !== caller.organization_id || target.user_type !== 'client') {
+      return NextResponse.json({ error: 'non autorisé' }, { status: 403 })
+    }
     await db.from('company_members').delete().eq('user_id', user_id)
     const { error } = await db.auth.admin.deleteUser(user_id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })

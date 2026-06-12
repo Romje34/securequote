@@ -71,6 +71,18 @@ export async function GET() {
   const monthlyCredits = plan?.monthly_credits ?? 0
   const remaining = Math.max(0, monthlyCredits - consumed)
 
+  // Essai gratuit (org sans forfait) : nombre de devis IA complets déjà générés (à vie).
+  const FREE_DEVIS_LIMIT = 5
+  let freeDevisUsed = 0
+  if (!plan) {
+    const { count } = await db
+      .from('ai_usage')
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', profile.organization_id)
+      .eq('mode', 'full')
+    freeDevisUsed = count ?? 0
+  }
+
   // Tous les forfaits disponibles (pour comparaison / changement de palier)
   const { data: plans } = await db
     .from('plans')
@@ -84,6 +96,8 @@ export async function GET() {
     consumed,
     remaining,
     period_start: periodStart,
+    free_devis_used: freeDevisUsed,
+    free_devis_limit: FREE_DEVIS_LIMIT,
     plans: plans ?? [],
   })
 }

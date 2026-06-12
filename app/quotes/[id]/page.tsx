@@ -57,6 +57,9 @@ type CatalogProduct = {
   list_price: number | null
 }
 
+type AiPlan = { id: string; name: string; monthly_credits: number; price: number }
+type UpgradeInfo = { error_code: string; plans: AiPlan[] }
+
 const STATUSES = [
   { key: "draft",    label: "Brouillon",  color: "#64748b" },
   { key: "sent",     label: "Envoyé",     color: "#3b82f6" },
@@ -150,6 +153,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [aiGenOpen, setAiGenOpen] = useState(false)
   const [aiGenDesc, setAiGenDesc] = useState("")
   const [aiGenLoading, setAiGenLoading] = useState(false)
+  const [upgrade, setUpgrade] = useState<UpgradeInfo | null>(null)
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000) }
 
@@ -292,6 +296,10 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       })
       if (!res.ok) {
         const b = await res.json().catch(() => ({}))
+        if (res.status === 402) {
+          setUpgrade({ error_code: b.error_code ?? "insufficient_credits", plans: b.plans ?? [] })
+          return
+        }
         showToast(`Erreur IA : ${b.error ?? res.status}`)
         return
       }
@@ -460,6 +468,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
     <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "system-ui, -apple-system, sans-serif" }}>
 
       {toast && <div style={S.toast}>{toast}</div>}
+      {upgrade && <UpgradeModal info={upgrade} onClose={() => setUpgrade(null)} />}
 
       {/* Modale d'envoi au client */}
       {sendOpen && (
@@ -601,6 +610,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
               onSaveItem={item => saveItem(item)}
               onDeleteItem={iid => deleteItem(ch.id, iid)}
               chapterTotal={chapterTotal(ch)}
+              onUpgrade={setUpgrade}
             />
           ))}
 
@@ -698,9 +708,58 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
 // ─── ChapterBlock ─────────────────────────────────────────────────────────────
 
+// Pop-up présentant les 3 forfaits quand l'essai gratuit est épuisé ou les crédits manquent.
+function UpgradeModal({ info, onClose }: { info: UpgradeInfo; onClose: () => void }) {
+  const isTrial = info.error_code === "trial_exhausted"
+  return (
+    <div onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: "#fff", borderRadius: 16, padding: "28px 30px", width: 520, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto" }}>
+        <div style={{ fontSize: 20, fontWeight: 800, color: "#1a202c", marginBottom: 6 }}>
+          {isTrial ? "🎁 Essai gratuit épuisé" : "✦ Crédits IA épuisés"}
+        </div>
+        <div style={{ fontSize: 14, color: "#64748b", marginBottom: 20, lineHeight: 1.5 }}>
+          {isTrial
+            ? "Vous avez utilisé vos 5 devis offerts. Choisissez un forfait pour continuer à générer vos devis par IA."
+            : "Votre forfait n'a plus de crédits ce mois-ci. Passez à un forfait supérieur pour continuer dès maintenant."}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {info.plans.map(p => (
+            <div key={p.id}
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "14px 16px", border: "1px solid #e2e8f0", borderRadius: 12 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "#1a202c" }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>
+                  {p.monthly_credits.toLocaleString("fr-FR")} crédits / mois
+                </div>
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#4f46e5", whiteSpace: "nowrap" }}>
+                {p.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} € <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>/ mois</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 22 }}>
+          <button onClick={onClose}
+            style={{ padding: "10px 18px", background: "#f1f5f9", color: "#475569", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            Plus tard
+          </button>
+          <a href="/settings"
+            style={{ padding: "10px 22px", background: "linear-gradient(135deg,#7c3aed,#4f46e5)", color: "#fff", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
+            Choisir un forfait →
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ChapterBlock({
   chapter, index, onRename, onDelete,
-  onAddRow, onOpenCatalog, onUpdateItem, onSaveItem, onDeleteItem, chapterTotal,
+  onAddRow, onOpenCatalog, onUpdateItem, onSaveItem, onDeleteItem, chapterTotal, onUpgrade,
 }: {
   chapter:       Chapter
   index:         number
@@ -712,6 +771,7 @@ function ChapterBlock({
   onSaveItem:    (item: Item) => void
   onDeleteItem:  (iid: string) => void
   chapterTotal:  number
+  onUpgrade:     (info: UpgradeInfo) => void
 }) {
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleVal, setTitleVal] = useState(chapter.title)
@@ -734,7 +794,13 @@ function ChapterBlock({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: "chapter", chapter_title: chapter.title, existing_items: chapter.items.map(i => i.designation) }),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        if (res.status === 402) {
+          const b = await res.json().catch(() => ({}))
+          onUpgrade({ error_code: b.error_code ?? "trial_exhausted", plans: b.plans ?? [] })
+        }
+        return
+      }
       const { items } = await res.json()
       if (Array.isArray(items)) {
         for (const it of items) {
