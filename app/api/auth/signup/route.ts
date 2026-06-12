@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient as adm } from '@/lib/supabase/admin'
+import { checkRateLimit, clientIp } from '@/lib/rate-limit'
 
 // POST public — auto-inscription d'un owner avec sa société.
 // Le compte est actif immédiatement et démarre sans forfait (essai gratuit : 5 devis IA).
@@ -19,6 +20,16 @@ export async function POST(request: Request) {
   }
 
   const db = adm()
+
+  // Anti-abus : route publique sans captcha → on borne les créations de compte
+  // par IP (5 par heure). Empêche la création massive de faux comptes/organisations.
+  const allowed = await checkRateLimit(db, `signup:${clientIp(request)}`, 5, 3600)
+  if (!allowed) {
+    return NextResponse.json(
+      { error: 'Trop de tentatives de création de compte. Réessayez dans une heure.' },
+      { status: 429 },
+    )
+  }
 
   const orgFields = {
     name:        company_name.trim(),
