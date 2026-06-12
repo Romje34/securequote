@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireUser } from '@/lib/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkRateLimit } from '@/lib/rate-limit'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
@@ -169,10 +170,21 @@ async function recordUsage(opts: {
 export async function POST(request: Request) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
-  const { user } = auth
+  const { user, db } = auth
 
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY non configurée' }, { status: 503 })
+  }
+
+  // Anti-rafale : borne les appels IA par utilisateur (10 / minute), en complément du
+  // système de crédits. Empêche d'épuiser l'API Anthropic par requêtes parallèles avant
+  // que la consommation ne soit comptabilisée.
+  const allowed = await checkRateLimit(db, `ai:${user.id}`, 10, 60)
+  if (!allowed) {
+    return NextResponse.json(
+      { error: 'Trop de requêtes IA en peu de temps. Patientez une minute.' },
+      { status: 429 },
+    )
   }
 
   const body = await request.json().catch(() => ({}))
