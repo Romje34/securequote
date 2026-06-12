@@ -1,40 +1,17 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
-
-async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser, userCanAccessQuote } from '@/lib/auth'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 // GET — devis complet avec chapitres + lignes (requêtes séparées pour éviter la dépendance FK)
 export async function GET(_req: Request, ctx: RouteContext) {
-  const { id } = await ctx.params
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
-  const db = adm()
+  const { id } = await ctx.params
+  const { allowed } = await userCanAccessQuote(db, user.id, id)
+  if (!allowed) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
   const { data: quote, error: qErr } = await db
     .from('quotes')
@@ -72,22 +49,25 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
 // PUT — mise à jour de l'en-tête du devis
 export async function PUT(request: Request, ctx: RouteContext) {
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
+
   const { id } = await ctx.params
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const { allowed } = await userCanAccessQuote(db, user.id, id)
+  if (!allowed) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
   const body = await request.json()
-  const allowed = [
+  const allowed_fields = [
     'title', 'reference', 'site_address', 'issued_at', 'valid_until',
     'salesperson', 'notes', 'conditions', 'tva_rate', 'status',
     'client_id', 'show_references', 'show_brands', 'show_unit_prices',
     'show_quantities', 'show_chapter_totals',
   ]
   const payload: Record<string, unknown> = {}
-  for (const k of allowed) if (k in body) payload[k] = body[k]
+  for (const k of allowed_fields) if (k in body) payload[k] = body[k]
 
-  const { data, error } = await adm()
+  const { data, error } = await db
     .from('quotes').update(payload).eq('id', id).select().single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -96,12 +76,15 @@ export async function PUT(request: Request, ctx: RouteContext) {
 
 // DELETE
 export async function DELETE(_req: Request, ctx: RouteContext) {
-  const { id } = await ctx.params
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
-  const { error } = await adm().from('quotes').delete().eq('id', id)
+  const { id } = await ctx.params
+  const { allowed } = await userCanAccessQuote(db, user.id, id)
+  if (!allowed) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+
+  const { error } = await db.from('quotes').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
 }

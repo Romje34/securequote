@@ -1,30 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import { sendQuoteEmail } from '@/lib/email'
-
-async function getSessionClient() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser, userCanAccessQuote } from '@/lib/auth'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -35,23 +11,21 @@ function itemTotal(it: { row_type: string; quantity: number; sell_price: number;
 
 // POST — envoie le devis par email au client avec un lien de consultation/signature
 export async function POST(request: Request, ctx: RouteContext) {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return NextResponse.json({ error: 'SUPABASE_SERVICE_ROLE_KEY manquante' }, { status: 500 })
-  }
   if (!process.env.RESEND_API_KEY) {
     return NextResponse.json({ error: "RESEND_API_KEY manquante — l'envoi d'email n'est pas configuré" }, { status: 500 })
   }
 
   try {
+    const auth = await requireUser()
+    if (auth instanceof NextResponse) return auth
+    const { user, db } = auth
+
     const { id } = await ctx.params
-    const supabase = await getSessionClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+    const { allowed } = await userCanAccessQuote(db, user.id, id)
+    if (!allowed) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
     const body = await request.json().catch(() => ({}))
     const overrideEmail = (body.email ?? '').toString().trim() || null
-
-    const db = adm()
 
     const { data: quote, error: quoteError } = await db
       .from('quotes')
@@ -61,9 +35,6 @@ export async function POST(request: Request, ctx: RouteContext) {
 
     if (quoteError || !quote) {
       return NextResponse.json({ error: 'Devis introuvable' }, { status: 404 })
-    }
-    if (quote.created_by !== user.id) {
-      return NextResponse.json({ error: 'non autorisé' }, { status: 403 })
     }
 
     const client = Array.isArray(quote.clients) ? quote.clients[0] : quote.clients
@@ -105,10 +76,11 @@ export async function POST(request: Request, ctx: RouteContext) {
       totalHT = (items ?? []).reduce((acc, it) => acc + itemTotal(it as { row_type: string; quantity: number; sell_price: number; discount: number }), 0)
     }
 
+    // Branding de l'auteur du devis (cohérent quel que soit l'expéditeur)
     const { data: branding } = await db
       .from('owner_branding')
       .select('trade_name')
-      .eq('owner_id', user.id)
+      .eq('owner_id', quote.created_by)
       .maybeSingle()
 
     await sendQuoteEmail({

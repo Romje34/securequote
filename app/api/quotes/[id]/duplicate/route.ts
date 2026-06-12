@@ -1,41 +1,18 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import { orgQuotePrefix } from '@/lib/quote-prefix'
-
-async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser, userCanAccessQuote } from '@/lib/auth'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 // POST — duplique un devis (en-tête + chapitres + lignes) en un nouveau brouillon
 export async function POST(_req: Request, ctx: RouteContext) {
-  const { id } = await ctx.params
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
-  const db = adm()
+  const { id } = await ctx.params
+  const { allowed } = await userCanAccessQuote(db, user.id, id)
+  if (!allowed) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
   const { data: original, error: origError } = await db
     .from('quotes')
@@ -44,17 +21,6 @@ export async function POST(_req: Request, ctx: RouteContext) {
     .single()
 
   if (origError || !original) return NextResponse.json({ error: 'Devis introuvable' }, { status: 404 })
-
-  // Vérifier que l'utilisateur est owner de la société du devis
-  const { data: membership } = await db
-    .from('company_members')
-    .select('user_id')
-    .eq('company_id', original.company_id)
-    .eq('user_id', user.id)
-    .eq('role', 'owner')
-    .maybeSingle()
-
-  if (!membership) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
   // Préfixe = 3 lettres du nom de l'organisation du user ; compteur global → référence unique
   const prefix = await orgQuotePrefix(db, user.id)

@@ -1,44 +1,10 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
-
-async function getSessionClient() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
-
-async function requireSuperAdmin() {
-  const supabase = await getSessionClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-  const db = adm()
-  const { data: profile } = await db.from('profiles').select('user_type').eq('id', user.id).single()
-  if (profile?.user_type !== 'superadmin') return null
-  return { user, db }
-}
+import { requireSuperAdmin } from '@/lib/auth'
 
 // GET — liste tous les owners avec leur organisation et leurs stats
 export async function GET() {
   const ctx = await requireSuperAdmin()
-  if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  if (ctx instanceof NextResponse) return ctx
   const { db } = ctx
 
   const { data: owners, error } = await db
@@ -106,7 +72,7 @@ export async function GET() {
 // POST — crée un owner avec sa société (obligatoire)
 export async function POST(request: Request) {
   const ctx = await requireSuperAdmin()
-  if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  if (ctx instanceof NextResponse) return ctx
   const { db } = ctx
 
   const body = await request.json()
@@ -194,7 +160,7 @@ export async function POST(request: Request) {
 // PATCH — attache ou modifie la société (organisation) d'un owner existant
 export async function PATCH(request: Request) {
   const ctx = await requireSuperAdmin()
-  if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  if (ctx instanceof NextResponse) return ctx
   const { db } = ctx
 
   const body = await request.json().catch(() => ({}))
@@ -243,7 +209,7 @@ export async function PATCH(request: Request) {
 // DELETE — supprime un owner
 export async function DELETE(request: Request) {
   const ctx = await requireSuperAdmin()
-  if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  if (ctx instanceof NextResponse) return ctx
   const { db } = ctx
 
   const { user_id } = await request.json()

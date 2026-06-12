@@ -1,45 +1,11 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
-
-async function getSessionClient() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
-
-async function requireSuperAdmin() {
-  const supabase = await getSessionClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-  const db = adm()
-  const { data: profile } = await db.from('profiles').select('user_type').eq('id', user.id).single()
-  if (profile?.user_type !== 'superadmin') return null
-  return { user, db }
-}
+import { requireSuperAdmin } from '@/lib/auth'
 
 // PATCH — attribue / change / retire le forfait IA d'une organisation (déblocage manuel,
 // en attendant l'auto-service Stripe). plan_id = null remet l'org en essai gratuit.
 export async function PATCH(request: Request) {
   const ctx = await requireSuperAdmin()
-  if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  if (ctx instanceof NextResponse) return ctx
   const { db } = ctx
 
   const { organization_id, plan_id } = await request.json().catch(() => ({}))

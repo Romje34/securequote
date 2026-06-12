@@ -1,71 +1,21 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import { orgQuotePrefix } from '@/lib/quote-prefix'
-
-async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser, accessibleCompanyIds, userCanAccessCompany } from '@/lib/auth'
 
 function itemTotal(it: { row_type: string; quantity: number; sell_price: number; discount: number }) {
   if (it.row_type !== 'item') return 0
   return it.quantity * it.sell_price * (1 - it.discount / 100)
 }
 
-// GET — liste les devis des sociétés de l'owner (filtrable par ?company_id=)
+// GET — liste les devis des sociétés accessibles (owner + membres invités), filtrable par ?company_id=
 export async function GET(request: Request) {
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
   const companyFilter = new URL(request.url).searchParams.get('company_id')
 
-  const db = adm()
-
-  const { data: owned } = await db
-    .from('company_members')
-    .select('company_id')
-    .eq('user_id', user.id)
-    .eq('role', 'owner')
-
-  let ids = (owned ?? []).map(r => r.company_id)
-
-  // Rollup owner : inclure les sociétés des members invités (leurs devis/KPI remontent à l'owner)
-  const { data: invitedMembers } = await db
-    .from('profiles')
-    .select('id')
-    .eq('invited_by', user.id)
-  const memberIds = (invitedMembers ?? []).map(p => p.id)
-  if (memberIds.length > 0) {
-    const { data: memberOwned } = await db
-      .from('company_members')
-      .select('company_id')
-      .in('user_id', memberIds)
-      .eq('role', 'owner')
-    for (const r of memberOwned ?? []) {
-      if (!ids.includes(r.company_id)) ids.push(r.company_id)
-    }
-  }
-
+  let ids = await accessibleCompanyIds(db, user.id)
   if (companyFilter) ids = ids.filter(id => id === companyFilter)
   if (ids.length === 0) return NextResponse.json([])
 
@@ -110,9 +60,9 @@ export async function GET(request: Request) {
 
 // POST — crée un devis avec ses chapitres initiaux
 export async function POST(request: Request) {
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
   const body = await request.json()
   const {
@@ -124,8 +74,9 @@ export async function POST(request: Request) {
   } = body
 
   if (!company_id) return NextResponse.json({ error: 'company_id requis' }, { status: 400 })
-
-  const db = adm()
+  if (!(await userCanAccessCompany(db, user.id, company_id))) {
+    return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  }
 
   // Valeurs par défaut du branding de l'owner (le préfixe vient de l'organisation, pas du branding)
   const { data: branding } = await db

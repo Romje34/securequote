@@ -1,37 +1,12 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
-
-async function getSessionClient() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser } from '@/lib/auth'
 
 // GET — l'organisation (société) à laquelle le compte connecté est rattaché
 export async function GET() {
-  const supabase = await getSessionClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
-  const db = adm()
   const { data: profile } = await db
     .from('profiles')
     .select('user_type, organization_id')
@@ -58,11 +33,10 @@ export async function GET() {
 
 // PATCH — modifie les informations de la société du owner connecté
 export async function PATCH(request: Request) {
-  const supabase = await getSessionClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
-  const db = adm()
   const { data: profile } = await db
     .from('profiles')
     .select('user_type, organization_id')
