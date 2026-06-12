@@ -34,6 +34,13 @@ const EMPTY_ORG_FORM = {
   city: "", country: "France", phone: "", company_email: "",
 }
 
+// Grille tarifaire des forfaits IA (figée — reflète le seed public.plans).
+const AI_PLANS = [
+  { name: "Essentiel", credits: 100,  price: 19 },
+  { name: "Pro",       credits: 400,  price: 49 },
+  { name: "Business",  credits: 1500, price: 129 },
+]
+
 export default function AdminPage() {
   const [user,          setUser]          = useState<User | null>(null)
   const [isSuperAdmin,  setIsSuperAdmin]  = useState<boolean | null>(null)
@@ -292,6 +299,36 @@ export default function AdminPage() {
               </button>
               {message && <p style={msgStyle(message)}>{message}</p>}
             </div>
+
+            {/* ── Forfaits IA (tarifs figés, à titre informatif) ── */}
+            <div style={S.card}>
+              <h2 style={S.cardTitle}>Forfaits IA</h2>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>
+                Tarifs appliqués · 1 crédit = 1 000 tokens · à titre informatif
+              </div>
+              <table style={S.planTable}>
+                <thead>
+                  <tr>
+                    <th style={{ ...S.planTh, textAlign: "left" }}>Forfait</th>
+                    <th style={S.planTh}>Crédits / mois</th>
+                    <th style={{ ...S.planTh, textAlign: "right" }}>Prix / mois</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {AI_PLANS.map(p => (
+                    <tr key={p.name}>
+                      <td style={{ ...S.planTd, fontWeight: 700, color: "#1a202c" }}>{p.name}</td>
+                      <td style={{ ...S.planTd, textAlign: "center" }}>
+                        {p.credits.toLocaleString("fr-FR")}
+                      </td>
+                      <td style={{ ...S.planTd, textAlign: "right", fontWeight: 600 }}>
+                        {p.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} €
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* ── Liste des owners ── */}
@@ -496,5 +533,16 @@ const S = {
   emptyCard: {
     background: "#fff", padding: "16px", border: "1px solid #e2e8f0",
     borderTop: "none", borderRadius: "0 0 8px 8px", color: "#94a3b8", fontSize: 13,
+  } as React.CSSProperties,
+  planTable: {
+    width: "100%", borderCollapse: "collapse" as const, fontSize: 13,
+  } as React.CSSProperties,
+  planTh: {
+    fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" as const,
+    letterSpacing: 0.4, textAlign: "center" as const, padding: "0 0 8px",
+    borderBottom: "1px solid #e2e8f0",
+  } as React.CSSProperties,
+  planTd: {
+    padding: "10px 0", color: "#374151", borderBottom: "1px solid #f1f5f9",
   } as React.CSSProperties,
 }
