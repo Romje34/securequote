@@ -1,39 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
-
-async function getSessionClient() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
-
-async function requireSuperAdmin() {
-  const supabase = await getSessionClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-  const db = adm()
-  const { data: profile } = await db.from('profiles').select('user_type').eq('id', user.id).single()
-  if (profile?.user_type !== 'superadmin') return null
-  return { user, db }
-}
+import { requireSuperAdmin } from '@/lib/auth'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 function startOfMonthISO() {
   const now = new Date()
@@ -46,14 +13,14 @@ type Plan = { id: string; name: string; monthly_credits: number; price: number }
 type Member = { id: string; email: string; role: 'owner' | 'member'; created_at: string; consumed_credits: number }
 type OwnerNode = Member & { members: Member[] }
 
-type Db = ReturnType<typeof adm>
+type Db = ReturnType<typeof createAdminClient>
 
 // GET — organisations actives, regroupées : org → owners, et sous chaque owner les membres
 // qu'il a invités. Tolère l'absence des objets crédits IA (plans / plan_id / ai_usage) tant
 // que la migration n'est pas appliquée : forfait null et consommation 0, sans planter la liste.
 export async function GET() {
   const ctx = await requireSuperAdmin()
-  if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  if (ctx instanceof NextResponse) return ctx
   const { db } = ctx
 
   // Données toujours présentes : organisations + profils.

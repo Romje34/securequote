@@ -1,14 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-// Client service-role : crée le compte, l'organisation et promeut le profil owner.
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { createAdminClient as adm } from '@/lib/supabase/admin'
 
 // POST public — auto-inscription d'un owner avec sa société.
 // Le compte est actif immédiatement et démarre sans forfait (essai gratuit : 5 devis IA).

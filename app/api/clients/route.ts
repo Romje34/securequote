@@ -1,40 +1,19 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
-
-async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function admin() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser, userCanAccessCompany } from '@/lib/auth'
 
 export async function GET(request: Request) {
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
   const { searchParams } = new URL(request.url)
   const company_id = searchParams.get('company_id')
   if (!company_id) return NextResponse.json({ error: 'company_id requis' }, { status: 400 })
+  if (!(await userCanAccessCompany(db, user.id, company_id))) {
+    return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  }
 
-  const { data, error } = await admin()
+  const { data, error } = await db
     .from('clients')
     .select('id, name, city, email, phone')
     .eq('company_id', company_id)
@@ -45,17 +24,20 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
   const body = await request.json()
   const { company_id, name, address, postal_code, city, country, phone, email, siret } = body
   if (!company_id || !name?.trim()) {
     return NextResponse.json({ error: 'company_id et name requis' }, { status: 400 })
   }
+  if (!(await userCanAccessCompany(db, user.id, company_id))) {
+    return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  }
 
-  const { data, error } = await admin()
+  const { data, error } = await db
     .from('clients')
     .insert({ company_id, name: name.trim(), address, postal_code, city, country, phone, email, siret })
     .select()

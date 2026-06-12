@@ -1,21 +1,21 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser, userCanAccessItem } from '@/lib/auth'
 
 type RouteContext = { params: Promise<{ id: string; iid: string }> }
 
 export async function PUT(request: Request, ctx: RouteContext) {
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
+
   const { iid } = await ctx.params
+  if (!(await userCanAccessItem(db, user.id, iid))) {
+    return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  }
+
   const body = await request.json()
 
-  const { data, error } = await adm().rpc('update_quote_item', {
+  const { data, error } = await db.rpc('update_quote_item', {
     p_id:          iid,
     p_designation: body.designation  ?? null,
     p_reference:   body.reference    ?? null,
@@ -36,8 +36,16 @@ export async function PUT(request: Request, ctx: RouteContext) {
 }
 
 export async function DELETE(_req: Request, ctx: RouteContext) {
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
+
   const { iid } = await ctx.params
-  const { error } = await adm().from('quote_items').delete().eq('id', iid)
+  if (!(await userCanAccessItem(db, user.id, iid))) {
+    return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
+  }
+
+  const { error } = await db.from('quote_items').delete().eq('id', iid)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ success: true })
 }
