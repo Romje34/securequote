@@ -48,16 +48,30 @@ export async function GET() {
     return NextResponse.json({ organization: null })
   }
 
-  // Forfait de l'organisation
+  // Organisation + son forfait (jointure manuelle, indépendante du cache FK PostgREST).
   const { data: org } = await db
     .from('organizations')
-    .select('id, name, plan:plan_id ( id, name, monthly_credits, price )')
+    .select('id, name')
     .eq('id', profile.organization_id)
     .maybeSingle()
 
-  const plan = (org?.plan ?? null) as
-    | { id: string; name: string; monthly_credits: number; price: number }
-    | null
+  // plan_id et plans sont optionnels tant que la migration crédits IA n'est pas appliquée.
+  const { data: orgPlan } = await db
+    .from('organizations')
+    .select('plan_id')
+    .eq('id', profile.organization_id)
+    .maybeSingle()
+  const planId = (orgPlan as { plan_id: string | null } | null)?.plan_id ?? null
+
+  type PlanRow = { id: string; name: string; monthly_credits: number; price: number; sort_order?: number }
+  const { data: plans } = await db
+    .from('plans')
+    .select('id, name, monthly_credits, price, sort_order')
+    .order('sort_order', { ascending: true })
+
+  const plan = planId
+    ? ((plans ?? []).find(p => p.id === planId) as PlanRow | undefined ?? null)
+    : null
 
   // Consommation du mois calendaire courant
   const periodStart = startOfMonthISO()
@@ -82,12 +96,6 @@ export async function GET() {
       .eq('mode', 'full')
     freeDevisUsed = count ?? 0
   }
-
-  // Tous les forfaits disponibles (pour comparaison / changement de palier)
-  const { data: plans } = await db
-    .from('plans')
-    .select('id, name, monthly_credits, price, sort_order')
-    .order('sort_order', { ascending: true })
 
   return NextResponse.json({
     organization: { id: org?.id, name: org?.name },

@@ -89,16 +89,18 @@ async function quotaBlock(userId: string): Promise<NextResponse | null> {
   const orgId = profile?.organization_id
   if (!orgId) return null // pas d'org → pas de quota (compte legacy)
 
+  // plan_id de l'org (colonne optionnelle tant que la migration crédits IA n'est pas appliquée).
   const { data: org } = await db
     .from('organizations')
-    .select('plan_id, plan:plan_id ( monthly_credits )')
+    .select('plan_id')
     .eq('id', orgId)
     .maybeSingle()
+  const planId = (org as { plan_id: string | null } | null)?.plan_id ?? null
 
   const fetchPlans = async () =>
     (await db.from('plans').select('id, name, monthly_credits, price, sort_order').order('sort_order', { ascending: true })).data ?? []
 
-  if (!org?.plan_id) {
+  if (!planId) {
     // Essai gratuit : compter les générations complètes (à vie).
     const { count } = await db
       .from('ai_usage')
@@ -115,8 +117,12 @@ async function quotaBlock(userId: string): Promise<NextResponse | null> {
   }
 
   // Forfait : vérifier la consommation du mois courant.
-  const plan = (org.plan ?? null) as unknown as { monthly_credits: number } | null
-  const monthly = plan?.monthly_credits ?? 0
+  const { data: planRow } = await db
+    .from('plans')
+    .select('monthly_credits')
+    .eq('id', planId)
+    .maybeSingle()
+  const monthly = (planRow as { monthly_credits: number } | null)?.monthly_credits ?? 0
   const { data: usage } = await db
     .from('ai_usage')
     .select('credits_consumed')

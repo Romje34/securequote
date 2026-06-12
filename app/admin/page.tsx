@@ -15,6 +15,7 @@ const AI_PLANS = [
 
 type Plan = { id: string; name: string; monthly_credits: number; price: number }
 type Member = { id: string; email: string; role: "owner" | "member"; created_at: string; consumed_credits: number }
+type OwnerNode = Member & { members: Member[] }
 type Org = {
   id: string
   name: string
@@ -23,7 +24,8 @@ type Org = {
   plan_id: string | null
   free_devis_used: number
   free_devis_limit: number
-  members: Member[]
+  owners: OwnerNode[]
+  unassigned_members: Member[]
 }
 type OrgData = { organizations: Org[]; orphan_members: Member[]; plans: Plan[] }
 
@@ -331,16 +333,19 @@ function OrgCard({ org, plans, busyId, onChangeRole, onChangePlan, onDelete }: {
   onDelete: (m: Member) => void
 }) {
   const trialPct = Math.min(100, Math.round((org.free_devis_used / Math.max(1, org.free_devis_limit)) * 100))
+  const accountCount =
+    org.owners.length + org.owners.reduce((s, o) => s + o.members.length, 0) + org.unassigned_members.length
+
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", overflow: "hidden" }}>
-      {/* En-tête organisation */}
+      {/* En-tête organisation (= raison sociale) */}
       <div style={{ background: "#1a1a2e", padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: "#fff", fontWeight: 800, fontSize: 15 }}>
             🏢 {org.name}{org.city ? <span style={{ color: "#94a3b8", fontWeight: 500 }}> · {org.city}</span> : null}
           </div>
           <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>
-            {org.members.length} compte{org.members.length !== 1 ? "s" : ""}
+            {org.owners.length} owner{org.owners.length !== 1 ? "s" : ""} · {accountCount} compte{accountCount !== 1 ? "s" : ""}
           </div>
         </div>
 
@@ -353,47 +358,74 @@ function OrgCard({ org, plans, busyId, onChangeRole, onChangePlan, onDelete }: {
               Essai gratuit · {org.free_devis_used}/{org.free_devis_limit} devis
             </span>
           )}
-          <select
-            value={org.plan_id ?? ""}
-            disabled={busyId === org.id}
-            onChange={e => onChangePlan(org, e.target.value)}
-            style={S.planSelect}
-            title="Attribuer / changer le forfait"
-          >
-            <option value="">Essai gratuit (aucun)</option>
-            {plans.map(p => (
-              <option key={p.id} value={p.id}>{p.name} — {p.monthly_credits} cr.</option>
-            ))}
-          </select>
+          {plans.length > 0 && (
+            <select
+              value={org.plan_id ?? ""}
+              disabled={busyId === org.id}
+              onChange={e => onChangePlan(org, e.target.value)}
+              style={S.planSelect}
+              title="Attribuer / changer le forfait"
+            >
+              <option value="">Essai gratuit (aucun)</option>
+              {plans.map(p => (
+                <option key={p.id} value={p.id}>{p.name} — {p.monthly_credits} cr.</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
-      {/* Comptes : owners puis membres */}
+      {/* Owners, et sous chaque owner ses membres rattachés */}
       <div>
-        {org.members.length === 0 ? (
+        {org.owners.length === 0 && org.unassigned_members.length === 0 ? (
           <div style={{ padding: "14px 16px", color: "#94a3b8", fontSize: 13 }}>Aucun compte rattaché.</div>
         ) : (
-          org.members.map(m => (
-            <MemberRow key={m.id} m={m} plan={org.plan} busyId={busyId}
-              onChangeRole={onChangeRole} onDelete={onDelete} />
-          ))
+          <>
+            {org.owners.map(owner => (
+              <div key={owner.id}>
+                <MemberRow m={owner} plan={org.plan} busyId={busyId}
+                  onChangeRole={onChangeRole} onDelete={onDelete} />
+                {owner.members.length > 0 && (
+                  <div style={S.memberGroup}>
+                    {owner.members.map(m => (
+                      <MemberRow key={m.id} m={m} plan={org.plan} busyId={busyId} nested
+                        onChangeRole={onChangeRole} onDelete={onDelete} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {org.unassigned_members.length > 0 && (
+              <div style={S.memberGroup}>
+                <div style={{ padding: "6px 16px", fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}>
+                  Membres non rattachés à un owner
+                </div>
+                {org.unassigned_members.map(m => (
+                  <MemberRow key={m.id} m={m} plan={org.plan} busyId={busyId} nested
+                    onChangeRole={onChangeRole} onDelete={onDelete} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   )
 }
 
-function MemberRow({ m, plan, busyId, onChangeRole, onDelete }: {
+function MemberRow({ m, plan, busyId, nested, onChangeRole, onDelete }: {
   m: Member
   plan: Plan | null
   busyId: string | null
+  nested?: boolean
   onChangeRole: (m: Member) => void
   onDelete: (m: Member) => void
 }) {
   const isOwner = m.role === "owner"
   const busy = busyId === m.id
   return (
-    <div style={S.accRow}>
+    <div style={{ ...S.accRow, ...(nested ? { background: "#fafbfc" } : {}) }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, color: "#1a202c", fontWeight: 600 }}>{m.email}</span>
@@ -486,6 +518,7 @@ const S = {
     padding: "12px 16px", display: "flex", alignItems: "flex-start", gap: 12,
     borderTop: "1px solid #f1f5f9",
   } as React.CSSProperties,
+  memberGroup: { borderLeft: "3px solid #e3d4f5", marginLeft: 16 } as React.CSSProperties,
   accMeta: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const, marginTop: 5 },
   chip: {
     fontSize: 11, color: "#374151", background: "#f1f5f9",

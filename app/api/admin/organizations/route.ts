@@ -35,7 +35,6 @@ async function requireSuperAdmin() {
   return { user, db }
 }
 
-// Premier jour du mois calendaire courant (UTC) — borne de remise à zéro de la conso.
 function startOfMonthISO() {
   const now = new Date()
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
@@ -44,96 +43,127 @@ function startOfMonthISO() {
 const FREE_DEVIS_LIMIT = 5
 
 type Plan = { id: string; name: string; monthly_credits: number; price: number }
+type Member = { id: string; email: string; role: 'owner' | 'member'; created_at: string; consumed_credits: number }
+type OwnerNode = Member & { members: Member[] }
 
-// GET — toutes les organisations actives, regroupées avec leurs comptes (owners puis membres),
-// le forfait de l'org et la consommation IA (mois courant) par compte.
+type Db = ReturnType<typeof adm>
+
+// GET — organisations actives, regroupées : org → owners, et sous chaque owner les membres
+// qu'il a invités. Tolère l'absence des objets crédits IA (plans / plan_id / ai_usage) tant
+// que la migration n'est pas appliquée : forfait null et consommation 0, sans planter la liste.
 export async function GET() {
   const ctx = await requireSuperAdmin()
   if (!ctx) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
   const { db } = ctx
 
-  const periodStart = startOfMonthISO()
-
-  const [orgsRes, profilesRes, plansRes] = await Promise.all([
-    db.from('organizations')
-      .select('id, name, city, plan_id, plan:plan_id ( id, name, monthly_credits, price )')
-      .order('created_at', { ascending: false }),
+  // Données toujours présentes : organisations + profils.
+  const [orgsRes, profilesRes] = await Promise.all([
+    db.from('organizations').select('id, name, city, created_at').order('created_at', { ascending: false }),
     db.from('profiles')
-      .select('id, email, user_type, created_at, organization_id')
+      .select('id, email, user_type, created_at, organization_id, invited_by')
       .in('user_type', ['integrator', 'client']),
-    db.from('plans')
-      .select('id, name, monthly_credits, price, sort_order')
-      .order('sort_order', { ascending: true }),
   ])
+
+  if (orgsRes.error)     return NextResponse.json({ error: orgsRes.error.message }, { status: 500 })
+  if (profilesRes.error) return NextResponse.json({ error: profilesRes.error.message }, { status: 500 })
 
   const orgs     = orgsRes.data ?? []
   const profiles = profilesRes.data ?? []
-  const plans    = (plansRes.data ?? []) as (Plan & { sort_order: number })[]
 
-  // Consommation IA du mois courant, par utilisateur + nombre de générations complètes par org.
-  const { data: usage } = await db
-    .from('ai_usage')
-    .select('organization_id, user_id, mode, credits_consumed, created_at')
-    .gte('created_at', periodStart)
+  // Données optionnelles (système de crédits IA) — best-effort, ignorées si non migrées.
+  const planById      = await loadPlans(db)
+  const planIdByOrg   = await loadOrgPlanIds(db)
+  const consumedByUser = await loadConsumption(db)
+  const fullCountByOrg = await loadFreeDevis(db)
 
-  const consumedByUser: Record<string, number> = {}
-  for (const u of usage ?? []) {
-    if (u.user_id) consumedByUser[u.user_id] = (consumedByUser[u.user_id] ?? 0) + (u.credits_consumed ?? 0)
-  }
+  const plansList = Object.values(planById).sort((a, b) => a.price - b.price)
 
-  // Générations complètes (essai gratuit) — compteur à vie, indépendant du mois.
-  const { data: fullUsage } = await db
-    .from('ai_usage')
-    .select('organization_id')
-    .eq('mode', 'full')
+  const toMember = (p: typeof profiles[number]): Member => ({
+    id:               p.id,
+    email:            p.email,
+    role:             p.user_type === 'integrator' ? 'owner' : 'member',
+    created_at:       p.created_at,
+    consumed_credits: consumedByUser[p.id] ?? 0,
+  })
 
-  const fullCountByOrg: Record<string, number> = {}
-  for (const u of fullUsage ?? []) {
-    if (u.organization_id) fullCountByOrg[u.organization_id] = (fullCountByOrg[u.organization_id] ?? 0) + 1
-  }
-
-  // Regroupement des profils par organisation.
-  type Member = { id: string; email: string; role: 'owner' | 'member'; created_at: string; consumed_credits: number }
-  const membersByOrg: Record<string, Member[]> = {}
-  const orphanMembers: Member[] = []
-
-  for (const p of profiles) {
-    const m: Member = {
-      id:               p.id,
-      email:            p.email,
-      role:             p.user_type === 'integrator' ? 'owner' : 'member',
-      created_at:       p.created_at,
-      consumed_credits: consumedByUser[p.id] ?? 0,
-    }
-    if (p.organization_id) {
-      ;(membersByOrg[p.organization_id] ??= []).push(m)
-    } else {
-      orphanMembers.push(m)
-    }
-  }
-
-  // Owners d'abord, puis membres, chacun par date de création.
-  const sortMembers = (a: Member, b: Member) =>
-    a.role !== b.role ? (a.role === 'owner' ? -1 : 1) : a.created_at.localeCompare(b.created_at)
+  const byDate = (a: { created_at: string }, b: { created_at: string }) => a.created_at.localeCompare(b.created_at)
 
   const organizations = orgs.map(o => {
-    const plan = (o.plan ?? null) as unknown as Plan | null
-    const members = (membersByOrg[o.id] ?? []).sort(sortMembers)
+    const orgProfiles = profiles.filter(p => p.organization_id === o.id)
+    const ownerProfiles = orgProfiles.filter(p => p.user_type === 'integrator').sort(byDate)
+    const memberProfiles = orgProfiles.filter(p => p.user_type === 'client')
+    const ownerIds = new Set(ownerProfiles.map(p => p.id))
+
+    const owners: OwnerNode[] = ownerProfiles.map(op => ({
+      ...toMember(op),
+      members: memberProfiles
+        .filter(mp => mp.invited_by === op.id)
+        .sort(byDate)
+        .map(toMember),
+    }))
+
+    // Membres rattachés à l'org mais à aucun owner courant (inviteur supprimé / promu, etc.).
+    const unassigned = memberProfiles
+      .filter(mp => !mp.invited_by || !ownerIds.has(mp.invited_by))
+      .sort(byDate)
+      .map(toMember)
+
+    const planId = planIdByOrg[o.id] ?? null
     return {
-      id:               o.id,
-      name:             o.name,
-      city:             o.city,
-      plan,
-      plan_id:          o.plan_id ?? null,
-      free_devis_used:  fullCountByOrg[o.id] ?? 0,
-      free_devis_limit: FREE_DEVIS_LIMIT,
-      members,
+      id:                 o.id,
+      name:               o.name,
+      city:               o.city,
+      plan:               planId ? (planById[planId] ?? null) : null,
+      plan_id:            planId,
+      free_devis_used:    fullCountByOrg[o.id] ?? 0,
+      free_devis_limit:   FREE_DEVIS_LIMIT,
+      owners,
+      unassigned_members: unassigned,
     }
   })
 
-  return NextResponse.json({
-    organizations,
-    orphan_members: orphanMembers.sort(sortMembers),
-    plans,
-  })
+  // Profils sans organisation (legacy).
+  const orphan_members = profiles
+    .filter(p => !p.organization_id)
+    .sort(byDate)
+    .map(toMember)
+
+  return NextResponse.json({ organizations, orphan_members, plans: plansList })
+}
+
+// ── Chargements optionnels (tolérants à l'absence des tables/colonnes) ──────────
+
+async function loadPlans(db: Db): Promise<Record<string, Plan>> {
+  const { data, error } = await db.from('plans').select('id, name, monthly_credits, price')
+  if (error || !data) return {}
+  return Object.fromEntries(data.map(p => [p.id, p as Plan]))
+}
+
+async function loadOrgPlanIds(db: Db): Promise<Record<string, string | null>> {
+  const { data, error } = await db.from('organizations').select('id, plan_id')
+  if (error || !data) return {}
+  return Object.fromEntries(data.map(o => [o.id, (o as { id: string; plan_id: string | null }).plan_id ?? null]))
+}
+
+async function loadConsumption(db: Db): Promise<Record<string, number>> {
+  const { data, error } = await db
+    .from('ai_usage')
+    .select('user_id, credits_consumed')
+    .gte('created_at', startOfMonthISO())
+  if (error || !data) return {}
+  const map: Record<string, number> = {}
+  for (const u of data) {
+    if (u.user_id) map[u.user_id] = (map[u.user_id] ?? 0) + (u.credits_consumed ?? 0)
+  }
+  return map
+}
+
+async function loadFreeDevis(db: Db): Promise<Record<string, number>> {
+  const { data, error } = await db.from('ai_usage').select('organization_id').eq('mode', 'full')
+  if (error || !data) return {}
+  const map: Record<string, number> = {}
+  for (const u of data) {
+    if (u.organization_id) map[u.organization_id] = (map[u.organization_id] ?? 0) + 1
+  }
+  return map
 }
