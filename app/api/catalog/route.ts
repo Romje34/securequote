@@ -1,20 +1,16 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@supabase/supabase-js'
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser } from '@/lib/auth'
 
 export async function GET(request: Request) {
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { db } = auth
+
   const { searchParams } = new URL(request.url)
   const q        = searchParams.get('q')        ?? ''
   const category = searchParams.get('category') ?? ''
 
-  let query = adm()
+  let query = db
     .from('product_catalog')
     .select('id, brand, reference, designation, category, unit, list_price')
     .order('brand').order('designation')

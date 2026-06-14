@@ -1,43 +1,20 @@
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { createElement } from 'react'
 import { QuotePDF } from '@/lib/pdf/QuotePDF'
 import type { PDFQuote, PDFBranding } from '@/lib/pdf/QuotePDF'
-
-async function getSupabase() {
-  const cookieStore = await cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(c) { c.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) },
-      },
-    }
-  )
-}
-
-function adm() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  )
-}
+import { requireUser, userCanAccessQuote } from '@/lib/auth'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(_req: Request, ctx: RouteContext) {
-  const { id } = await ctx.params
-  const supabase = await getSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const { user, db } = auth
 
-  const db = adm()
+  const { id } = await ctx.params
+  const { allowed } = await userCanAccessQuote(db, user.id, id)
+  if (!allowed) return NextResponse.json({ error: 'Accès refusé' }, { status: 403 })
 
   // Charger le devis + chapitres + items (requêtes séparées)
   const { data: quote, error: qErr } = await db
@@ -67,11 +44,11 @@ export async function GET(_req: Request, ctx: RouteContext) {
     rawItems = rows ?? []
   }
 
-  // Charger le branding de l'owner
+  // Branding de l'auteur du devis (et non du lecteur, qui peut être l'owner via rollup)
   const { data: branding } = await db
     .from('owner_branding')
     .select('*')
-    .eq('owner_id', user.id)
+    .eq('owner_id', quote.created_by)
     .maybeSingle()
 
   const chapters = (rawChapters ?? []).map((ch: Record<string, unknown>) => ({
