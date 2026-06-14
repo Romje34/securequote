@@ -1,29 +1,19 @@
-"use client"
+import { redirect } from "next/navigation"
+import { createClient } from "@/lib/supabase/server"
 
-import { useEffect } from "react"
-import { createClient } from "@/lib/supabase/client"
+// Le tableau de bord unifié vit sur /companies (KPI + sociétés + équipe).
+// Cette route ne fait que router selon le type de compte, côté serveur :
+// pas de bundle JS, pas de rechargement dur — un simple 307 avant tout rendu.
+export default async function DashboardRedirect() {
+  const sb = await createClient()
+  const { data: { user } } = await sb.auth.getUser()
+  if (!user) redirect("/login")
 
-const sb = createClient()
+  const { data: p } = await sb
+    .from("profiles")
+    .select("user_type")
+    .eq("id", user.id)
+    .single()
 
-// Le tableau de bord unifié vit désormais sur /companies (KPI + sociétés + équipe).
-// Cette route ne fait plus que rediriger selon le type de compte.
-export default function DashboardRedirect() {
-  useEffect(() => {
-    sb.auth.getUser().then(async ({ data }) => {
-      const u = data.user
-      if (!u) { window.location.href = "/login"; return }
-      const { data: p } = await sb
-        .from("profiles")
-        .select("user_type")
-        .eq("id", u.id)
-        .single()
-      window.location.href = p?.user_type === "superadmin" ? "/admin" : "/companies"
-    })
-  }, [])
-
-  return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <div style={{ color: "#64748b", fontSize: 14 }}>Redirection…</div>
-    </div>
-  )
+  redirect(p?.user_type === "superadmin" ? "/admin" : "/companies")
 }
