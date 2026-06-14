@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, Suspense } from "react"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
@@ -61,6 +61,7 @@ function isWon(q: { status: string; signed_at: string | null }) {
 }
 
 function QuotesPageInner() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const companyFilterFromUrl = searchParams.get("company")
 
@@ -174,7 +175,7 @@ function QuotesPageInner() {
     })
     const data = await res.json()
     if (res.ok) {
-      window.location.href = `/quotes/${data.id}`
+      router.push(`/quotes/${data.id}`)
     } else {
       setQError(data.error ?? "Erreur lors de la création du devis")
       setQCreating(false)

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
@@ -74,6 +75,7 @@ function aggregateKpis(quotes: QuoteSummary[], companyIds: string[]) {
 }
 
 export default function CompaniesPage() {
+  const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [userType, setUserType] = useState<string | null>(null)
   const [companies, setCompanies] = useState<Company[]>([])
@@ -242,7 +244,7 @@ export default function CompaniesPage() {
     })
     const data = await res.json()
     if (res.ok) {
-      window.location.href = `/quotes/${data.id}`
+      router.push(`/quotes/${data.id}`)
     } else {
       setQError(data.error ?? "Erreur lors de la création du devis")
       setQCreating(false)
@@ -385,6 +387,7 @@ export default function CompaniesPage() {
         </div>
         <nav style={S.nav}>
           <Link href="/quotes" style={S.navLink}>Devis</Link>
+          <Link href="/calculateur" style={S.navLink}>Calculateur</Link>
           {isIntegrator && <Link href="/settings" style={S.navLink}>Paramètres</Link>}
           {isIntegrator && <Link href="/premium" style={S.btnPremium}>✦ Premium</Link>}
           <button
