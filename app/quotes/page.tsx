@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { isWon } from "@/lib/quote"
 import type { User } from "@supabase/supabase-js"
 
 const sb = createClient()
@@ -55,11 +56,6 @@ function single<T>(v: T | T[] | null): T | null {
   if (!v) return null
   return Array.isArray(v) ? (v[0] ?? null) : v
 }
-// Un devis est "gagné" s'il est signé électroniquement OU marqué accepté manuellement
-function isWon(q: { status: string; signed_at: string | null }) {
-  return q.status === "accepted" || !!q.signed_at
-}
-
 function QuotesPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()

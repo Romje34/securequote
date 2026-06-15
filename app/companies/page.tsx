@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { isWon } from "@/lib/quote"
 import type { User } from "@supabase/supabase-js"
 
 const sb = createClient()
@@ -55,11 +56,6 @@ const FORM_FIELDS = [
 const EMPTY_FORM = {
   company_name: "", email: "", phone: "", siret: "", vat_number: "",
   city: "", address_line_1: "", postal_code: "", country: "FR",
-}
-
-// Un devis est "gagné" s'il est signé électroniquement OU marqué accepté manuellement
-function isWon(q: { status: string; signed_at: string | null }) {
-  return q.status === "accepted" || !!q.signed_at
 }
 
 // Agrège les KPI d'un ensemble de sociétés (par leurs ids)
