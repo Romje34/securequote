@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
+import ContactAdmin from "@/components/ContactAdmin"
 
 const supabase = createClient()
 
@@ -117,6 +118,7 @@ export default function AccountPage() {
                 {emailLoading ? "Envoi…" : "Changer mon email"}
               </button>
               {emailMsg && <p style={emailMsg.ok ? S.ok : S.err}>{emailMsg.text}</p>}
+              {emailMsg && !emailMsg.ok && <ContactAdmin message="Le changement d'email n'a pas pu aboutir (votre adresse actuelle reste inchangée)." />}
             </div>
 
             {/* ── Mot de passe ── */}

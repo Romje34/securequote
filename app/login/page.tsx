@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 import Turnstile from "@/components/Turnstile"
+import ContactAdmin from "@/components/ContactAdmin"
 
 const supabase = createClient()
 
@@ -26,6 +27,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState("")
   const [notice, setNotice] = useState("")          // bandeau d'information (succès)
+  const [needsAdmin, setNeedsAdmin] = useState(false) // erreur serveur → contacter l'admin
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
 
   useEffect(() => {
@@ -75,14 +77,25 @@ export default function LoginPage() {
     if (!turnstileOk)                return setMessage("Veuillez valider le test anti-robot.")
     setLoading(true)
     setMessage("")
-    const res = await fetch("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...signup, turnstile_token: turnstileToken }),
-    })
+    setNeedsAdmin(false)
+    let res: Response
+    try {
+      res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...signup, turnstile_token: turnstileToken }),
+      })
+    } catch {
+      setMessage("Erreur réseau pendant la création du compte.")
+      setNeedsAdmin(true)
+      setLoading(false)
+      return
+    }
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       setMessage(data.error ?? `Erreur HTTP ${res.status}`)
+      // Échec serveur (création/email) → mode verbeux : contacter l'admin.
+      if (res.status >= 500) setNeedsAdmin(true)
       setLoading(false)
       return
     }
@@ -115,6 +128,7 @@ export default function LoginPage() {
   function goTo(v: View) {
     setMessage("")
     setNotice("")
+    setNeedsAdmin(false)
     setTurnstileToken(null)
     setView(v)
   }
@@ -234,6 +248,7 @@ export default function LoginPage() {
             </button>
 
             {message && <p style={S.errorBanner}>{message}</p>}
+            {needsAdmin && <ContactAdmin message="Votre compte n'a pas pu être créé (aucune donnée enregistrée)." />}
 
             <p style={S.switchLine}>
               Déjà un compte ?{" "}
