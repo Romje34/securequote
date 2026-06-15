@@ -3,37 +3,65 @@
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
+import Turnstile from "@/components/Turnstile"
 
 const supabase = createClient()
+
+const SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY
 
 const EMPTY_SIGNUP = {
   email: "", password: "", company_name: "", siret: "", address: "",
   postal_code: "", city: "", country: "France", phone: "", company_email: "",
 }
 
+type View = "login" | "signup" | "forgot"
+
 export default function LoginPage() {
-  const [view, setView] = useState<"login" | "signup">("login")
+  const [view, setView] = useState<View>("login")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [signup, setSignup] = useState(EMPTY_SIGNUP)
+  const [forgotEmail, setForgotEmail] = useState("")
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState("")
+  const [notice, setNotice] = useState("")          // bandeau d'information (succès)
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user))
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user)
+      // Bannières issues des redirections email (/auth/confirm) — dans ce callback
+      // async pour éviter un setState synchrone dans le corps de l'effet.
+      const params = new URLSearchParams(window.location.search)
+      if (params.get("confirmed")) setNotice("Votre email est confirmé. Vous pouvez vous connecter.")
+      if (params.get("error") === "lien_invalide") setMessage("Lien invalide. Relancez l'opération.")
+      if (params.get("error") === "lien_expire") setMessage("Lien expiré. Relancez l'opération.")
+    })
     const { data: listener } = supabase.auth.onAuthStateChange((_, session) => {
       setUser(session ? session.user : null)
     })
     return () => listener.subscription.unsubscribe()
   }, [])
 
+  // Turnstile requis seulement si une site key est configurée.
+  const turnstileOk = !SITE_KEY || !!turnstileToken
+
   async function handleLogin() {
     setLoading(true)
     setMessage("")
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) { setMessage(error.message); setLoading(false) }
-    else window.location.href = "/dashboard"
+    if (error) {
+      const msg = error.message.toLowerCase()
+      if (msg.includes("not confirmed") || msg.includes("confirm")) {
+        setMessage("Votre email n'est pas encore confirmé. Cliquez sur le lien reçu par email pour activer votre compte.")
+      } else {
+        setMessage(error.message)
+      }
+      setLoading(false)
+    } else {
+      window.location.href = "/dashboard"
+    }
   }
 
   function setField(key: keyof typeof EMPTY_SIGNUP, value: string) {
@@ -44,12 +72,13 @@ export default function LoginPage() {
     if (!signup.email.trim())        return setMessage("Email requis")
     if (!signup.password)            return setMessage("Mot de passe requis")
     if (!signup.company_name.trim()) return setMessage("La raison sociale est obligatoire")
+    if (!turnstileOk)                return setMessage("Veuillez valider le test anti-robot.")
     setLoading(true)
     setMessage("")
     const res = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(signup),
+      body: JSON.stringify({ ...signup, turnstile_token: turnstileToken }),
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
@@ -57,17 +86,43 @@ export default function LoginPage() {
       setLoading(false)
       return
     }
-    // Compte actif immédiatement → connexion automatique.
-    const { error } = await supabase.auth.signInWithPassword({ email: signup.email, password: signup.password })
-    if (error) {
-      setMessage("Compte créé. Connectez-vous avec vos identifiants.")
-      setView("login")
-      setEmail(signup.email)
-      setLoading(false)
-    } else {
-      window.location.href = "/dashboard"
-    }
+    // Compte créé NON confirmé : pas de connexion automatique. On invite à vérifier l'email.
+    setSignup(EMPTY_SIGNUP)
+    setTurnstileToken(null)
+    setView("login")
+    setEmail(data.email ?? signup.email)
+    setNotice("Compte créé. Un email de confirmation vous a été envoyé : cliquez sur le lien pour activer votre compte avant de vous connecter.")
+    setLoading(false)
   }
+
+  async function handleForgot() {
+    if (!forgotEmail.trim()) return setMessage("Email requis")
+    if (!turnstileOk)        return setMessage("Veuillez valider le test anti-robot.")
+    setLoading(true)
+    setMessage("")
+    await fetch("/api/auth/reset-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: forgotEmail, turnstile_token: turnstileToken }),
+    }).catch(() => {})
+    // Réponse volontairement neutre (anti-énumération).
+    setTurnstileToken(null)
+    setView("login")
+    setNotice("Si un compte existe pour cette adresse, un email de réinitialisation vient d'être envoyé.")
+    setLoading(false)
+  }
+
+  function goTo(v: View) {
+    setMessage("")
+    setNotice("")
+    setTurnstileToken(null)
+    setView(v)
+  }
+
+  const subtitle =
+    view === "login"  ? "Connectez-vous à votre espace" :
+    view === "signup" ? "Créez votre compte et votre société" :
+                        "Réinitialisez votre mot de passe"
 
   return (
     <div style={S.page}>
@@ -75,9 +130,7 @@ export default function LoginPage() {
         <div style={S.logoWrap}>
           <div style={S.logoBox}>S</div>
           <h1 style={S.title}>SecureQuote</h1>
-          <p style={S.subtitle}>
-            {view === "login" ? "Connectez-vous à votre espace" : "Créez votre compte et votre société"}
-          </p>
+          <p style={S.subtitle}>{subtitle}</p>
         </div>
 
         {user && (
@@ -86,35 +139,30 @@ export default function LoginPage() {
           </div>
         )}
 
-        {view === "login" ? (
+        {notice && <p style={S.successBanner}>{notice}</p>}
+
+        {view === "login" && (
           <>
             <div style={{ marginBottom: 12 }}>
               <label style={S.label}>Email</label>
-              <input
-                type="email"
-                placeholder="votre@email.com"
-                value={email}
+              <input type="email" placeholder="votre@email.com" value={email}
                 onChange={e => setEmail(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") handleLogin() }}
-                autoComplete="username"
-                style={S.input}
-              />
+                autoComplete="username" style={S.input} />
             </div>
-
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: 8 }}>
               <label style={S.label}>Mot de passe</label>
-              <input
-                type="password"
-                placeholder="••••••••"
-                value={password}
+              <input type="password" placeholder="••••••••" value={password}
                 onChange={e => setPassword(e.target.value)}
                 onKeyDown={e => { if (e.key === "Enter") handleLogin() }}
-                autoComplete="current-password"
-                style={S.input}
-              />
+                autoComplete="current-password" style={S.input} />
+            </div>
+            <div style={{ textAlign: "right", marginBottom: 18 }}>
+              <button type="button" onClick={() => goTo("forgot")} style={S.linkSm}>Mot de passe oublié ?</button>
             </div>
 
-            <button onClick={handleLogin} disabled={loading} style={{ ...S.btn, opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}>
+            <button onClick={handleLogin} disabled={loading}
+              style={{ ...S.btn, opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}>
               {loading ? "Connexion..." : "Se connecter"}
             </button>
 
@@ -122,12 +170,12 @@ export default function LoginPage() {
 
             <p style={S.switchLine}>
               Pas encore de compte ?{" "}
-              <button type="button" onClick={() => { setMessage(""); setView("signup") }} style={S.switchLink}>
-                S&apos;inscrire
-              </button>
+              <button type="button" onClick={() => goTo("signup")} style={S.switchLink}>S&apos;inscrire</button>
             </p>
           </>
-        ) : (
+        )}
+
+        {view === "signup" && (
           <>
             <div style={S.sectionLabel}>Identifiants</div>
             <Field label="Email" required>
@@ -176,8 +224,12 @@ export default function LoginPage() {
                 onChange={e => setField("company_email", e.target.value)} style={S.input} />
             </Field>
 
-            <button onClick={handleSignup} disabled={loading}
-              style={{ ...S.btn, marginTop: 6, opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}>
+            <div style={{ marginTop: 14 }}>
+              <Turnstile onToken={setTurnstileToken} />
+            </div>
+
+            <button onClick={handleSignup} disabled={loading || !turnstileOk}
+              style={{ ...S.btn, marginTop: 6, opacity: (loading || !turnstileOk) ? 0.7 : 1, cursor: (loading || !turnstileOk) ? "not-allowed" : "pointer" }}>
               {loading ? "Création..." : "Créer mon compte"}
             </button>
 
@@ -185,9 +237,33 @@ export default function LoginPage() {
 
             <p style={S.switchLine}>
               Déjà un compte ?{" "}
-              <button type="button" onClick={() => { setMessage(""); setView("login") }} style={S.switchLink}>
-                Se connecter
-              </button>
+              <button type="button" onClick={() => goTo("login")} style={S.switchLink}>Se connecter</button>
+            </p>
+          </>
+        )}
+
+        {view === "forgot" && (
+          <>
+            <Field label="Email" required>
+              <input type="email" placeholder="votre@email.com" value={forgotEmail}
+                onChange={e => setForgotEmail(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && turnstileOk) handleForgot() }}
+                autoComplete="username" style={S.input} />
+            </Field>
+
+            <div style={{ marginTop: 8 }}>
+              <Turnstile onToken={setTurnstileToken} />
+            </div>
+
+            <button onClick={handleForgot} disabled={loading || !turnstileOk}
+              style={{ ...S.btn, marginTop: 6, opacity: (loading || !turnstileOk) ? 0.7 : 1, cursor: (loading || !turnstileOk) ? "not-allowed" : "pointer" }}>
+              {loading ? "Envoi..." : "Recevoir le lien de réinitialisation"}
+            </button>
+
+            {message && <p style={S.errorBanner}>{message}</p>}
+
+            <p style={S.switchLine}>
+              <button type="button" onClick={() => goTo("login")} style={S.switchLink}>← Retour à la connexion</button>
             </p>
           </>
         )}
@@ -218,6 +294,7 @@ const S = {
   sectionLabel: { fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" as const, letterSpacing: 0.5, marginBottom: 8 } as React.CSSProperties,
   switchLine: { marginTop: 18, textAlign: "center" as const, fontSize: 13, color: "#64748b" },
   switchLink: { background: "none", border: "none", color: "#1a1a2e", fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" } as React.CSSProperties,
+  linkSm: { background: "none", border: "none", color: "#3b82f6", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: 0, textDecoration: "underline" } as React.CSSProperties,
   card: {
     background: "#fff",
     borderRadius: 16,

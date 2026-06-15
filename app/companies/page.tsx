@@ -97,7 +97,6 @@ export default function CompaniesPage() {
   const [members, setMembers] = useState<Member[]>([])
   const [organization, setOrganization] = useState<Organization | null>(null)
   const [newEmail, setNewEmail] = useState("")
-  const [newPassword, setNewPassword] = useState("")
   const [memberMsg, setMemberMsg] = useState("")
   const [memberLoading, setMemberLoading] = useState(false)
   const [showCompanyModal, setShowCompanyModal] = useState(false)
@@ -143,21 +142,24 @@ export default function CompaniesPage() {
   }
 
   async function handleCreateMember() {
-    if (!newEmail)    return setMemberMsg("Email requis")
-    if (!newPassword) return setMemberMsg("Mot de passe requis")
+    if (!newEmail) return setMemberMsg("Email requis")
     setMemberLoading(true)
     setMemberMsg("")
     const res = await fetch("/api/members", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: newEmail, password: newPassword }),
+      body: JSON.stringify({ email: newEmail }),
     })
     const data = await res.json()
     if (!res.ok) {
       setMemberMsg(data.error ?? `Erreur HTTP ${res.status}`)
     } else {
-      setMemberMsg(data.already_member ? `${data.email} est déjà dans votre équipe.` : `Compte créé : ${data.email}`)
-      setNewEmail(""); setNewPassword("")
+      if (data.already_member) {
+        setMemberMsg(`${data.email} est déjà dans votre équipe.`)
+      } else {
+        setMemberMsg(`Invitation envoyée à ${data.email} — il définira son mot de passe via l'email reçu.`)
+      }
+      setNewEmail("")
       setShowMemberModal(false)
       fetchMembers()
     }
@@ -388,6 +390,7 @@ export default function CompaniesPage() {
         <nav style={S.nav}>
           <Link href="/quotes" style={S.navLink}>Devis</Link>
           <Link href="/calculateur" style={S.navLink}>Calculateur</Link>
+          <Link href="/account" style={S.navLink}>Compte</Link>
           {isIntegrator && <Link href="/settings" style={S.navLink}>Paramètres</Link>}
           {isIntegrator && <Link href="/premium" style={S.btnPremium}>✦ Premium</Link>}
           <button
@@ -413,7 +416,7 @@ export default function CompaniesPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => { setMessage(""); setForm(EMPTY_FORM); setShowCompanyModal(true) }} style={S.btnAction}>+ Société</button>
             {isIntegrator && (
-              <button onClick={() => { setMemberMsg(""); setNewEmail(""); setNewPassword(""); setShowMemberModal(true) }} style={{ ...S.btnAction, background: "#5a2d82" }}>+ Membre</button>
+              <button onClick={() => { setMemberMsg(""); setNewEmail(""); setShowMemberModal(true) }} style={{ ...S.btnAction, background: "#5a2d82" }}>+ Membre</button>
             )}
           </div>
         </div>
@@ -488,7 +491,7 @@ export default function CompaniesPage() {
             <div style={S.panel}>
               <div style={{ ...S.sectionHeader, background: "#0f766e", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span>Mon équipe ({members.length})</span>
-                <button onClick={() => { setMemberMsg(""); setNewEmail(""); setNewPassword(""); setShowMemberModal(true) }} style={S.panelAdd} title="Ajouter un membre">+</button>
+                <button onClick={() => { setMemberMsg(""); setNewEmail(""); setShowMemberModal(true) }} style={S.panelAdd} title="Ajouter un membre">+</button>
               </div>
               <div style={S.panelBody}>
                 {members.length === 0
@@ -552,12 +555,12 @@ export default function CompaniesPage() {
               <label style={S.label}>Email</label>
               <input type="email" placeholder="membre@email.com" value={newEmail}
                 onChange={e => setNewEmail(e.target.value)} style={S.input} autoComplete="username" />
-              <label style={S.label}>Mot de passe temporaire</label>
-              <input type="password" placeholder="••••••••" value={newPassword}
-                onChange={e => setNewPassword(e.target.value)} style={S.input} autoComplete="new-password" />
+              <p style={{ fontSize: 11, color: "#64748b", margin: "4px 0 12px", lineHeight: 1.4 }}>
+                Un email d&apos;invitation lui sera envoyé : il confirmera son adresse et choisira lui-même son mot de passe.
+              </p>
               <button type="submit" disabled={memberLoading}
                 style={{ ...S.btnPrimary, opacity: memberLoading ? 0.7 : 1, cursor: memberLoading ? "not-allowed" : "pointer" }}>
-                {memberLoading ? "Création..." : "Créer le compte"}
+                {memberLoading ? "Envoi..." : "Envoyer l'invitation"}
               </button>
             </form>
             {memberMsg && <p style={memberMsgStyle(memberMsg)}>{memberMsg}</p>}
