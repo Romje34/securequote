@@ -8,9 +8,9 @@ const sb = createClient()
 
 // Grille tarifaire des forfaits IA (figée — reflète le seed public.plans).
 const AI_PLANS = [
-  { name: "Essentiel", credits: 100,  price: 19 },
-  { name: "Pro",       credits: 400,  price: 49 },
-  { name: "Business",  credits: 1500, price: 129 },
+  { name: "Essentiel", credits: 100,  price: 17 },
+  { name: "Pro",       credits: 400,  price: 47 },
+  { name: "Business",  credits: 1500, price: 127 },
 ]
 
 type Plan = { id: string; name: string; monthly_credits: number; price: number }

@@ -24,9 +24,9 @@ create policy "plans_read_auth"
 -- Seed initial (uniquement si la table est vide)
 insert into public.plans (name, monthly_credits, price, sort_order)
 select * from (values
-  ('Essentiel',  100,  19.00, 10),
-  ('Pro',        400,  49.00, 20),
-  ('Business',  1500, 129.00, 30)
+  ('Essentiel',  100,  17.00, 10),
+  ('Pro',        400,  47.00, 20),
+  ('Business',  1500, 127.00, 30)
 ) as v(name, monthly_credits, price, sort_order)
 where not exists (select 1 from public.plans);
 
@@ -34,10 +34,10 @@ where not exists (select 1 from public.plans);
 alter table public.organizations
   add column if not exists plan_id uuid references public.plans(id);
 
--- Continuité : les organisations existantes héritent du forfait Pro
-update public.organizations o
-set plan_id = (select id from public.plans where name = 'Pro' limit 1)
-where o.plan_id is null;
+-- Pas d'attribution automatique : les comptes existants sont des comptes
+-- de test (email non vérifié). Les organisations démarrent sans forfait
+-- (plan_id NULL = free tier de 5 devis IA offerts), l'abonnement sera posé
+-- via le paiement (Stripe, à venir) ou manuellement par le superadmin.
 
 -- ── Registre d'usage IA (source de vérité de la consommation) ─
 create table if not exists public.ai_usage (
