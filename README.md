@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SecureQuote
 
-## Getting Started
+SaaS B2B de devis pour intégrateurs de sûreté / sécurité électronique
+(vidéosurveillance, contrôle d'accès, détection intrusion, réseau, interphonie,
+supervision, cybersécurité, maintenance).
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** (App Router) + **TypeScript** + **React 19**
+- **Supabase** (Postgres, Auth SSR via `@supabase/ssr`)
+- **Tailwind CSS 4**
+- **Anthropic SDK** — suggestions de devis par IA
+- **@react-pdf/renderer** — génération des PDF de devis
+- **Resend** — emails transactionnels
+- Cloudflare **Turnstile** — anti-bot à l'inscription
+
+## Démarrage
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+App sur http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Variables d'environnement (`.env.local`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Usage |
+|----------|-------|
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Client Supabase |
+| `SUPABASE_SERVICE_ROLE_KEY` | Client admin (server-only) |
+| `ANTHROPIC_API_KEY` | Suggestions IA |
+| `RESEND_API_KEY` | Envoi d'emails |
+| `TURNSTILE_SECRET_KEY` / `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | Vérification Turnstile |
 
-## Learn More
+## Architecture
 
-To learn more about Next.js, take a look at the following resources:
+- `app/` — pages (App Router) et routes API (`app/api/**`)
+- `lib/` — code partagé : `auth.ts` (auth/autorisation centralisées),
+  `rate-limit.ts`, `turnstile.ts`, `email.ts`, `supabase/{client,server,admin}.ts`,
+  `pdf/QuotePDF.tsx`
+- `components/` — composants UI partagés
+- `supabase/migrations/` — migrations SQL versionnées
+- `proxy.ts` — middleware (auth + redirections)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Modèle de données
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Multi-tenant : `organizations` (le tenant de l'intégrateur) → `profiles`
+(comptes, rôles owner/membre) → `companies` (sociétés clientes) → devis
+(chapitres → lignes). Voir `supabase/migrations/`.
 
-## Deploy on Vercel
+## Scripts
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run dev     # serveur de développement
+npm run build   # build production
+npm run start   # serveur production
+npm run lint    # ESLint
+```
