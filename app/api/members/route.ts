@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createSessionClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sendAccountInviteEmail } from '@/lib/email'
 
 const getSessionClient = createSessionClient
 const adm = createAdminClient
@@ -77,9 +78,9 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
 
-    const { email, password } = await request.json()
-    if (!email || !password) {
-      return NextResponse.json({ error: 'email et password sont requis' }, { status: 400 })
+    const { email } = await request.json()
+    if (!email) {
+      return NextResponse.json({ error: 'email requis' }, { status: 400 })
     }
 
     const db = adm()
@@ -93,17 +94,14 @@ export async function POST(request: Request) {
 
     const ownerOrgId = ownerProfile?.organization_id ?? null
 
-    // Créer le compte auth
-    const { data: created, error: createError } = await db.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    })
+    // Crée le compte membre NON confirmé et SANS mot de passe : il reçoit une
+    // invitation pour confirmer son email et définir son mot de passe.
+    const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+    const { data: linkData, error: createError } = await db.auth.admin.generateLink({ type: 'invite', email })
 
-    if (createError) {
-      const alreadyExists =
-        createError.message.toLowerCase().includes('already') ||
-        createError.message.toLowerCase().includes('existe')
+    if (createError || !linkData?.user || !linkData.properties?.hashed_token) {
+      const msg = (createError?.message ?? '').toLowerCase()
+      const alreadyExists = msg.includes('already') || msg.includes('registered') || msg.includes('existe')
 
       if (alreadyExists) {
         const { data: existing } = await db
@@ -116,6 +114,7 @@ export async function POST(request: Request) {
           if (existing.invited_by === user.id) {
             return NextResponse.json({ already_member: true, user_id: existing.id, email }, { status: 200 })
           } else if (!existing.invited_by) {
+            // Compte déjà existant (et confirmé) : on le rattache, sans invitation.
             await db.from('profiles').update({
               user_type:       'client',
               invited_by:      user.id,
@@ -130,10 +129,10 @@ export async function POST(request: Request) {
           }
         }
       }
-      return NextResponse.json({ error: createError.message }, { status: 400 })
+      return NextResponse.json({ error: createError?.message ?? 'Erreur lors de la création du compte' }, { status: 400 })
     }
 
-    const newUserId = created.user.id
+    const newUserId = linkData.user.id
 
     // Rattacher le membre à l'owner ET à son organisation
     await db.from('profiles').update({
@@ -155,7 +154,18 @@ export async function POST(request: Request) {
       )
     }
 
-    return NextResponse.json({ user_id: newUserId, email }, { status: 201 })
+    // Envoi de l'invitation. En cas d'échec, on annule la création (compte non activable).
+    const inviteUrl = `${origin}/auth/confirm?token_hash=${linkData.properties.hashed_token}&type=invite&next=/reset`
+    try {
+      await sendAccountInviteEmail({ to: email, inviteUrl, roleLabel: "membre" })
+    } catch (err) {
+      await db.from('company_members').delete().eq('user_id', newUserId)
+      await db.auth.admin.deleteUser(newUserId)
+      const detail = err instanceof Error ? err.message : 'inconnue'
+      return NextResponse.json({ error: `Impossible d'envoyer l'invitation (${detail}).` }, { status: 502 })
+    }
+
+    return NextResponse.json({ invited: true, user_id: newUserId, email }, { status: 201 })
   } catch (err: unknown) {
     console.error('[api/members POST]', err)
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Erreur interne' }, { status: 500 })

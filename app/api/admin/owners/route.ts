@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireSuperAdmin } from '@/lib/auth'
+import { sendAccountInviteEmail } from '@/lib/email'
 
 // GET — liste tous les owners avec leur organisation et leurs stats
 export async function GET() {
@@ -69,33 +70,43 @@ export async function GET() {
   return NextResponse.json(result)
 }
 
-// POST — crée un owner avec sa société (obligatoire)
+// POST — crée un owner avec sa société (obligatoire).
+// Le compte est créé NON confirmé et SANS mot de passe : la personne reçoit un
+// email d'invitation pour confirmer son adresse et définir elle-même son mot de
+// passe (règle : aucun compte sans email vérifié).
 export async function POST(request: Request) {
   const ctx = await requireSuperAdmin()
   if (ctx instanceof NextResponse) return ctx
   const { db } = ctx
 
   const body = await request.json()
-  const { email, password, company_name, siret, address, postal_code, city, country, phone, company_email } = body
+  const { email, company_name, siret, address, postal_code, city, country, phone, company_email } = body
 
-  if (!email || !password) {
-    return NextResponse.json({ error: 'Email et mot de passe requis' }, { status: 400 })
+  if (!email) {
+    return NextResponse.json({ error: 'Email requis' }, { status: 400 })
   }
   if (!company_name?.trim()) {
     return NextResponse.json({ error: 'La raison sociale est obligatoire' }, { status: 400 })
   }
 
-  // Créer le compte auth
-  const { data: created, error: createError } = await db.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  })
+  const orgFields = {
+    name:        company_name.trim(),
+    siret:       siret         || null,
+    address:     address       || null,
+    postal_code: postal_code   || null,
+    city:        city          || null,
+    country:     country        || 'France',
+    phone:       phone          || null,
+    email:       company_email  || null,
+  }
 
-  if (createError) {
-    const alreadyExists =
-      createError.message.toLowerCase().includes('already') ||
-      createError.message.toLowerCase().includes('existe')
+  // Crée le compte non confirmé et génère le lien d'invitation (confirmation + mot de passe).
+  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+  const { data: linkData, error: linkError } = await db.auth.admin.generateLink({ type: 'invite', email })
+
+  if (linkError || !linkData?.user || !linkData.properties?.hashed_token) {
+    const msg = (linkError?.message ?? '').toLowerCase()
+    const alreadyExists = msg.includes('already') || msg.includes('registered') || msg.includes('existe')
 
     if (alreadyExists) {
       const { data: existing } = await db
@@ -108,10 +119,10 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Cet email est déjà un owner.' }, { status: 409 })
       }
       if (existing) {
-        // Créer l'organisation et promouvoir le compte existant
+        // Compte déjà existant (et déjà confirmé) : on le promeut owner, sans invitation.
         const { data: org } = await db
           .from('organizations')
-          .insert({ name: company_name.trim(), siret: siret || null, address: address || null, postal_code: postal_code || null, city: city || null, country: country || 'France', phone: phone || null, email: company_email || null })
+          .insert(orgFields)
           .select('id').single()
 
         await db.from('profiles').update({
@@ -121,30 +132,21 @@ export async function POST(request: Request) {
 
         return NextResponse.json({ upgraded: true, user_id: existing.id, email, organization_name: company_name }, { status: 200 })
       }
+      return NextResponse.json({ error: 'Cet email est déjà utilisé.' }, { status: 409 })
     }
-    return NextResponse.json({ error: createError.message }, { status: 400 })
+    return NextResponse.json({ error: linkError?.message ?? 'Erreur lors de la création du compte' }, { status: 400 })
   }
 
-  const newUserId = created.user.id
+  const newUserId = linkData.user.id
 
   // Créer l'organisation
   const { data: org, error: orgError } = await db
     .from('organizations')
-    .insert({
-      name:        company_name.trim(),
-      siret:       siret        || null,
-      address:     address      || null,
-      postal_code: postal_code  || null,
-      city:        city         || null,
-      country:     country      || 'France',
-      phone:       phone        || null,
-      email:       company_email || null,
-    })
+    .insert(orgFields)
     .select('id')
     .single()
 
   if (orgError) {
-    // Annuler la création du compte si l'org échoue
     await db.auth.admin.deleteUser(newUserId)
     return NextResponse.json({ error: `Erreur organisation : ${orgError.message}` }, { status: 500 })
   }
@@ -154,7 +156,18 @@ export async function POST(request: Request) {
     organization_id: org.id,
   }).eq('id', newUserId)
 
-  return NextResponse.json({ user_id: newUserId, email, organization_name: company_name }, { status: 201 })
+  // Envoi de l'invitation. En cas d'échec, on annule tout (compte non activable).
+  const inviteUrl = `${origin}/auth/confirm?token_hash=${linkData.properties.hashed_token}&type=invite&next=/reset`
+  try {
+    await sendAccountInviteEmail({ to: email, inviteUrl, roleLabel: "owner (intégrateur)" })
+  } catch (err) {
+    await db.from('organizations').delete().eq('id', org.id)
+    await db.auth.admin.deleteUser(newUserId)
+    const detail = err instanceof Error ? err.message : 'inconnue'
+    return NextResponse.json({ error: `Impossible d'envoyer l'invitation (${detail}).` }, { status: 502 })
+  }
+
+  return NextResponse.json({ invited: true, user_id: newUserId, email, organization_name: company_name }, { status: 201 })
 }
 
 // PATCH — attache ou modifie la société (organisation) d'un owner existant

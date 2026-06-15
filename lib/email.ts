@@ -144,3 +144,85 @@ export async function sendSignatureConfirmation(opts: {
     client.emails.send({ from: FROM, to: [opts.to_client], subject: `Confirmation — Devis N° ${opts.quote_number} signé`, html }),
   ])
 }
+
+// ── Emails d'authentification (owner) ─────────────────────────────────────────
+// Gabarit commun : carte sombre + bouton d'action. Utilisé pour la confirmation
+// d'inscription et la réinitialisation de mot de passe.
+
+function authEmailHtml(opts: { heading: string; intro: string; cta: string; url: string; note: string }) {
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:system-ui,-apple-system,sans-serif">
+<div style="max-width:560px;margin:32px auto;padding:0 16px">
+  <div style="background:#1a1a2e;padding:28px 32px;border-radius:14px 14px 0 0;text-align:center">
+    <div style="width:44px;height:44px;border-radius:10px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:20px;line-height:44px">S</div>
+    <div style="font-size:19px;font-weight:800;color:#fff;margin-top:12px">${opts.heading}</div>
+  </div>
+  <div style="background:#fff;padding:30px 32px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 14px 14px">
+    <p style="margin:0 0 22px;font-size:14px;color:#475569;line-height:1.7">${opts.intro}</p>
+    <div style="text-align:center;margin:26px 0">
+      <a href="${opts.url}" style="display:inline-block;background:#1a1a2e;color:#fff;padding:14px 38px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px">${opts.cta}</a>
+    </div>
+    <p style="font-size:12px;color:#94a3b8;text-align:center;line-height:1.6;margin:0">
+      ${opts.note}<br>
+      <a href="${opts.url}" style="color:#3b82f6;word-break:break-all">${opts.url}</a>
+    </p>
+  </div>
+  <div style="text-align:center;padding:14px"><span style="font-size:11px;color:#94a3b8">SecureQuote</span></div>
+</div>
+</body></html>`
+}
+
+// Confirmation d'inscription : active le compte owner après clic.
+export async function sendSignupConfirmationEmail(opts: { to: string; confirmUrl: string }) {
+  const { error } = await getResend().emails.send({
+    from:    FROM,
+    to:      [opts.to],
+    subject: "Confirmez votre adresse email — SecureQuote",
+    html: authEmailHtml({
+      heading: "Confirmez votre email",
+      intro:   "Bienvenue sur SecureQuote. Pour activer votre compte et accéder à votre espace, confirmez votre adresse email en cliquant sur le bouton ci-dessous.",
+      cta:     "Activer mon compte",
+      url:     opts.confirmUrl,
+      note:    "Ce lien est valable un temps limité. Si vous n'êtes pas à l'origine de cette inscription, ignorez ce message.",
+    }),
+  })
+  if (error) throw new Error(error.message)
+}
+
+// Invitation : compte créé par un admin (owner) ou un owner (membre). Le destinataire
+// confirme son email ET définit lui-même son mot de passe via le lien.
+export async function sendAccountInviteEmail(opts: { to: string; inviteUrl: string; roleLabel?: string }) {
+  const role = opts.roleLabel ?? "votre compte"
+  const { error } = await getResend().emails.send({
+    from:    FROM,
+    to:      [opts.to],
+    subject: "Activez votre compte SecureQuote",
+    html: authEmailHtml({
+      heading: "Activez votre compte",
+      intro:   `Un accès ${role} a été créé pour vous sur SecureQuote. Pour l'activer, confirmez votre adresse email et définissez votre mot de passe en cliquant sur le bouton ci-dessous.`,
+      cta:     "Activer mon compte",
+      url:     opts.inviteUrl,
+      note:    "Ce lien est valable un temps limité. Si vous n'attendiez pas cette invitation, ignorez ce message.",
+    }),
+  })
+  if (error) throw new Error(error.message)
+}
+
+// Réinitialisation de mot de passe : mène vers la page de saisie d'un nouveau mot de passe.
+export async function sendPasswordResetEmail(opts: { to: string; resetUrl: string }) {
+  const { error } = await getResend().emails.send({
+    from:    FROM,
+    to:      [opts.to],
+    subject: "Réinitialisation de votre mot de passe — SecureQuote",
+    html: authEmailHtml({
+      heading: "Mot de passe oublié ?",
+      intro:   "Vous avez demandé à réinitialiser votre mot de passe. Cliquez sur le bouton ci-dessous pour en définir un nouveau.",
+      cta:     "Réinitialiser mon mot de passe",
+      url:     opts.resetUrl,
+      note:    "Ce lien est valable un temps limité. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe reste inchangé.",
+    }),
+  })
+  if (error) throw new Error(error.message)
+}

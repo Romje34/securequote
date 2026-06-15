@@ -39,7 +39,6 @@ export default function AdminPage() {
 
   // Formulaire création owner
   const [email,        setEmail]        = useState("")
-  const [password,     setPassword]     = useState("")
   const [companyName,  setCompanyName]  = useState("")
   const [siret,        setSiret]        = useState("")
   const [address,      setAddress]      = useState("")
@@ -76,14 +75,13 @@ export default function AdminPage() {
   }
 
   function resetForm() {
-    setEmail(""); setPassword(""); setCompanyName(""); setSiret("")
+    setEmail(""); setCompanyName(""); setSiret("")
     setAddress(""); setPostalCode(""); setCity(""); setCountry("France")
     setPhone(""); setCompanyEmail("")
   }
 
   async function handleCreate() {
     if (!email)       return setMessage("Email requis")
-    if (!password)    return setMessage("Mot de passe requis")
     if (!companyName) return setMessage("La raison sociale est obligatoire")
     setLoading(true)
     setMessage("")
@@ -91,7 +89,7 @@ export default function AdminPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        email, password,
+        email,
         company_name:  companyName,
         siret:         siret        || null,
         address:       address      || null,
@@ -109,7 +107,7 @@ export default function AdminPage() {
       setMessage(`Compte existant promu owner — ${d.email} (${d.organization_name})`)
       resetForm(); fetchOrgs()
     } else {
-      setMessage(`Owner créé — ${d.email} · ${d.organization_name}`)
+      setMessage(`Invitation envoyée à ${d.email} · ${d.organization_name} — il définira son mot de passe via l'email reçu.`)
       resetForm(); fetchOrgs()
     }
     setLoading(false)
@@ -188,6 +186,12 @@ export default function AdminPage() {
           <span style={S.adminBadge}>Super Admin</span>
         </div>
         <nav style={S.nav}>
+          <button onClick={() => { window.location.href = "/account" }} style={S.btnLogout}>
+            Mon compte
+          </button>
+          <button onClick={() => { window.location.href = "/admin/accounts" }} style={S.btnLogout}>
+            Journal des utilisateurs
+          </button>
           <button onClick={() => sb.auth.signOut().then(() => { window.location.href = "/login" })} style={S.btnLogout}>
             Déconnexion
           </button>
@@ -208,9 +212,7 @@ export default function AdminPage() {
               <label style={S.label}>Email <span style={S.required}>*</span></label>
               <input type="email" placeholder="owner@exemple.com" value={email} onChange={e => setEmail(e.target.value)}
                 style={S.input} autoComplete="username" />
-              <label style={S.label}>Mot de passe temporaire <span style={S.required}>*</span></label>
-              <input type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)}
-                style={S.input} autoComplete="new-password" />
+              <p style={S.hint}>Un email d&apos;invitation lui sera envoyé : il confirmera son adresse et choisira lui-même son mot de passe.</p>
 
               <div style={{ ...S.sectionLabel, marginTop: 16 }}>Société <span style={S.required}>*</span></div>
               <label style={S.label}>Raison sociale <span style={S.required}>*</span></label>
@@ -333,8 +335,8 @@ function OrgCard({ org, plans, busyId, onChangeRole, onChangePlan, onDelete }: {
   onDelete: (m: Member) => void
 }) {
   const trialPct = Math.min(100, Math.round((org.free_devis_used / Math.max(1, org.free_devis_limit)) * 100))
-  const accountCount =
-    org.owners.length + org.owners.reduce((s, o) => s + o.members.length, 0) + org.unassigned_members.length
+  const allMembers = [...org.owners.flatMap(o => o.members), ...org.unassigned_members]
+  const accountCount = org.owners.length + allMembers.length
 
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", overflow: "hidden" }}>
@@ -375,36 +377,45 @@ function OrgCard({ org, plans, busyId, onChangeRole, onChangePlan, onDelete }: {
         </div>
       </div>
 
-      {/* Owners, et sous chaque owner ses membres rattachés */}
+      {/* Une ligne par owner : owner à GAUCHE, ses membres rattachés à DROITE */}
       <div>
-        {org.owners.length === 0 && org.unassigned_members.length === 0 ? (
+        {org.owners.length === 0 && allMembers.length === 0 ? (
           <div style={{ padding: "14px 16px", color: "#94a3b8", fontSize: 13 }}>Aucun compte rattaché.</div>
         ) : (
           <>
+            <div style={S.orgRow}>
+              <div style={{ ...S.colHead, ...S.ownerCell }}>Owner</div>
+              <div style={S.colHead}>Membres rattachés</div>
+            </div>
+
             {org.owners.map(owner => (
-              <div key={owner.id}>
-                <MemberRow m={owner} plan={org.plan} busyId={busyId}
-                  onChangeRole={onChangeRole} onDelete={onDelete} />
-                {owner.members.length > 0 && (
-                  <div style={S.memberGroup}>
-                    {owner.members.map(m => (
-                      <MemberRow key={m.id} m={m} plan={org.plan} busyId={busyId} nested
+              <div key={owner.id} style={S.orgRow}>
+                <div style={S.ownerCell}>
+                  <MemberRow m={owner} plan={org.plan} busyId={busyId}
+                    onChangeRole={onChangeRole} onDelete={onDelete} />
+                </div>
+                <div>
+                  {owner.members.length === 0 ? (
+                    <div style={S.colEmpty}>—</div>
+                  ) : (
+                    owner.members.map(m => (
+                      <MemberRow key={m.id} m={m} plan={org.plan} busyId={busyId}
                         onChangeRole={onChangeRole} onDelete={onDelete} />
-                    ))}
-                  </div>
-                )}
+                    ))
+                  )}
+                </div>
               </div>
             ))}
 
             {org.unassigned_members.length > 0 && (
-              <div style={S.memberGroup}>
-                <div style={{ padding: "6px 16px", fontSize: 11, color: "#94a3b8", fontStyle: "italic" }}>
-                  Membres non rattachés à un owner
+              <div style={S.orgRow}>
+                <div style={{ ...S.colEmpty, ...S.ownerCell, fontStyle: "italic" }}>Sans owner</div>
+                <div>
+                  {org.unassigned_members.map(m => (
+                    <MemberRow key={m.id} m={m} plan={org.plan} busyId={busyId}
+                      onChangeRole={onChangeRole} onDelete={onDelete} />
+                  ))}
                 </div>
-                {org.unassigned_members.map(m => (
-                  <MemberRow key={m.id} m={m} plan={org.plan} busyId={busyId} nested
-                    onChangeRole={onChangeRole} onDelete={onDelete} />
-                ))}
               </div>
             )}
           </>
@@ -494,6 +505,7 @@ const S = {
   cardTitle:    { margin: "0 0 16px", fontSize: 15, fontWeight: 700, color: "#1a202c" },
   sectionLabel: { fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase" as const, letterSpacing: 0.5, marginBottom: 8 },
   required:     { color: "#ef4444" },
+  hint:         { fontSize: 11, color: "#64748b", margin: "4px 0 0", lineHeight: 1.4 } as React.CSSProperties,
   label: { display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4 } as React.CSSProperties,
   input: {
     display: "block", width: "100%", padding: "9px 12px", borderRadius: 8,
@@ -519,6 +531,10 @@ const S = {
     borderTop: "1px solid #f1f5f9",
   } as React.CSSProperties,
   memberGroup: { borderLeft: "3px solid #e3d4f5", marginLeft: 16 } as React.CSSProperties,
+  orgRow:    { display: "grid", gridTemplateColumns: "1fr 1fr", alignItems: "stretch", borderTop: "1px solid #e2e8f0" } as React.CSSProperties,
+  ownerCell: { borderRight: "1px solid #e2e8f0", minWidth: 0 } as React.CSSProperties,
+  colHead:   { padding: "8px 16px", fontSize: 11, fontWeight: 800, color: "#5a2d82", textTransform: "uppercase" as const, letterSpacing: 0.5, background: "#f8fafc" } as React.CSSProperties,
+  colEmpty:  { padding: "14px 16px", color: "#94a3b8", fontSize: 13 } as React.CSSProperties,
   accMeta: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" as const, marginTop: 5 },
   chip: {
     fontSize: 11, color: "#374151", background: "#f1f5f9",

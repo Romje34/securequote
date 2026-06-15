@@ -224,6 +224,7 @@ function QuotesPageInner() {
           <span style={{ color: "#334155" }}>|</span>
           <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>Mes devis</span>
         </div>
+        <a href="/account" style={{ color: "#93c5fd", fontSize: 13, textDecoration: "none", fontWeight: 600 }}>Mon compte</a>
       </header>
 
       <div style={{ maxWidth: 1240, margin: "0 auto", padding: "24px 16px" }}>

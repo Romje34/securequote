@@ -212,6 +212,7 @@ export default function SettingsPage() {
         <nav style={S.nav}>
           <a href="/dashboard" style={S.navLink}>Tableau de bord</a>
           <a href="/companies" style={S.navLink}>Mes sociétés</a>
+          <a href="/account" style={S.navLink}>Mon compte</a>
           <button
             onClick={() => sb.auth.signOut().then(() => { window.location.href = "/login" })}
             style={S.btnLogout}
