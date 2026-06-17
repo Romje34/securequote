@@ -7,6 +7,26 @@ import type { User } from "@supabase/supabase-js"
 
 const sb = createClient()
 
+// Démarre un abonnement Stripe pour un forfait et redirige vers la page de paiement.
+async function startCheckout(planId: string) {
+  const res = await fetch("/api/billing/checkout", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan_id: planId }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (res.ok && data.url) { window.location.href = data.url; return }
+  alert(data.error || "Le paiement n'est pas disponible pour le moment.")
+}
+
+// Ouvre le portail client Stripe (gérer / résilier l'abonnement).
+async function openPortal() {
+  const res = await fetch("/api/billing/portal", { method: "POST" })
+  const data = await res.json().catch(() => ({}))
+  if (res.ok && data.url) { window.location.href = data.url; return }
+  alert(data.error || "Gestion de l'abonnement indisponible.")
+}
+
 type Branding = {
   trade_name: string
   address: string
@@ -311,7 +331,7 @@ export default function SettingsPage() {
 
         {/* Crédits IA */}
         {creditsLoaded && credits?.organization && (
-          <CreditsCard credits={credits} primaryColor={branding.primary_color} />
+          <CreditsCard credits={credits} primaryColor={branding.primary_color} canManage={canEditOrg} />
         )}
 
         <div style={S.cols}>
@@ -531,7 +551,8 @@ export default function SettingsPage() {
 }
 
 // Grille des forfaits disponibles, réutilisée pour l'essai gratuit et un forfait actif.
-function PlansGrid({ plans, currentId, accent }: { plans: Plan[]; currentId: string | null; accent: string }) {
+// canManage = owner (peut souscrire/changer de forfait via Stripe).
+function PlansGrid({ plans, currentId, accent, canManage }: { plans: Plan[]; currentId: string | null; accent: string; canManage: boolean }) {
   return (
     <div style={{ marginTop: 18 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 10 }}>Forfaits disponibles</div>
@@ -543,6 +564,7 @@ function PlansGrid({ plans, currentId, accent }: { plans: Plan[]; currentId: str
               flex: "1 1 160px", minWidth: 150, borderRadius: 10, padding: "14px 16px",
               border: `1.5px solid ${current ? accent : "#e2e8f0"}`,
               background: current ? "#f8fafc" : "#fff",
+              display: "flex", flexDirection: "column",
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>{p.name}</span>
@@ -559,18 +581,31 @@ function PlansGrid({ plans, currentId, accent }: { plans: Plan[]; currentId: str
               <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
                 {p.monthly_credits.toLocaleString("fr-FR")} crédits / mois
               </div>
+              {canManage && !current && (
+                <button
+                  onClick={() => startCheckout(p.id)}
+                  style={{
+                    marginTop: 12, padding: "8px 12px", borderRadius: 8, border: "none",
+                    background: accent, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  }}
+                >
+                  S&apos;abonner
+                </button>
+              )}
             </div>
           )
         })}
       </div>
-      <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 10 }}>
-        Pour changer de forfait, contactez votre administrateur.
-      </div>
+      {!canManage && (
+        <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 10 }}>
+          Pour changer de forfait, contactez votre administrateur.
+        </div>
+      )}
     </div>
   )
 }
 
-function CreditsCard({ credits, primaryColor }: { credits: Credits; primaryColor: string }) {
+function CreditsCard({ credits, primaryColor, canManage }: { credits: Credits; primaryColor: string; canManage: boolean }) {
   const { plan, monthly_credits, consumed, remaining, plans } = credits
   const accent = primaryColor || "#1a1a2e"
 
@@ -603,7 +638,7 @@ function CreditsCard({ credits, primaryColor }: { credits: Credits; primaryColor
             Vous avez utilisé vos {limit} devis offerts. Choisissez un forfait ci-dessous pour continuer à générer par IA.
           </div>
         )}
-        {plans.length > 0 && <PlansGrid plans={plans} currentId={null} accent={accent} />}
+        {plans.length > 0 && <PlansGrid plans={plans} currentId={null} accent={accent} canManage={canManage} />}
       </div>
     )
   }
@@ -655,7 +690,19 @@ function CreditsCard({ credits, primaryColor }: { credits: Credits; primaryColor
         </div>
       )}
 
-      {plans.length > 0 && <PlansGrid plans={plans} currentId={plan?.id ?? null} accent={accent} />}
+      {plans.length > 0 && <PlansGrid plans={plans} currentId={plan?.id ?? null} accent={accent} canManage={canManage} />}
+
+      {canManage && (
+        <button
+          onClick={openPortal}
+          style={{
+            marginTop: 16, padding: "9px 14px", borderRadius: 8, border: `1.5px solid ${accent}`,
+            background: "#fff", color: accent, fontSize: 13, fontWeight: 700, cursor: "pointer",
+          }}
+        >
+          Gérer mon abonnement
+        </button>
+      )}
     </div>
   )
 }
