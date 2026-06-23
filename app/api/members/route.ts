@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createSessionClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkRateLimit } from '@/lib/rate-limit'
 import { sendAccountInviteEmail } from '@/lib/email'
 
 const getSessionClient = createSessionClient
@@ -84,6 +85,16 @@ export async function POST(request: Request) {
     }
 
     const db = adm()
+
+    // Anti-abus : borne les invitations qu'un owner peut déclencher (emails sortants
+    // via Resend → coût + réputation du domaine). Compteur par owner, pas par IP.
+    const allowed = await checkRateLimit(db, `member-invite:${user.id}`, 20, 3600)
+    if (!allowed) {
+      return NextResponse.json(
+        { error: "Trop d'invitations envoyées. Réessayez dans une heure." },
+        { status: 429 },
+      )
+    }
 
     // Récupérer l'organisation de l'owner pour l'hériter au membre
     const { data: ownerProfile } = await db
