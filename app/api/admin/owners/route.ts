@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireSuperAdmin } from '@/lib/auth'
+import { checkRateLimit } from '@/lib/rate-limit'
 import { sendAccountInviteEmail } from '@/lib/email'
 
 // GET — liste tous les owners avec leur organisation et leurs stats
@@ -77,7 +78,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const ctx = await requireSuperAdmin()
   if (ctx instanceof NextResponse) return ctx
-  const { db } = ctx
+  const { user, db } = ctx
 
   const body = await request.json()
   const { email, company_name, siret, address, postal_code, city, country, phone, company_email } = body
@@ -87,6 +88,16 @@ export async function POST(request: Request) {
   }
   if (!company_name?.trim()) {
     return NextResponse.json({ error: 'La raison sociale est obligatoire' }, { status: 400 })
+  }
+
+  // Anti-abus : borne les invitations owner déclenchées (emails sortants). Compteur
+  // par superadmin ; généreux car rôle de confiance, mais plafonne un compte compromis.
+  const allowed = await checkRateLimit(db, `owner-invite:${user.id}`, 30, 3600)
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Trop d'invitations envoyées. Réessayez dans une heure." },
+      { status: 429 },
+    )
   }
 
   const orgFields = {
