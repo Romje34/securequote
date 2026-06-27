@@ -107,6 +107,7 @@ export default function SettingsPage() {
 
   const [credits, setCredits]       = useState<Credits | null>(null)
   const [creditsLoaded, setCreditsLoaded] = useState(false)
+  const [tab, setTab] = useState<"societe" | "devis" | "abonnement">("societe")
   const logoRef = useRef<HTMLInputElement>(null)
   const headerRef = useRef<HTMLInputElement>(null)
   const signatureRef = useRef<HTMLInputElement>(null)
@@ -243,28 +244,45 @@ export default function SettingsPage() {
       </header>
 
       <div style={S.container}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <h1 style={S.pageTitle}>Paramètres — Mon entreprise</h1>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{ ...S.btnSave, opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? "Enregistrement..." : "Enregistrer"}
-          </button>
-        </div>
+        <h1 style={S.pageTitle}>Paramètres</h1>
 
-        {message && (
-          <div style={msgStyle(message)}>{message}</div>
+        {/* Barre abonnement — toujours visible (owners + members), actions réservées aux owners */}
+        {creditsLoaded && credits?.organization && (
+          <AccountSummary
+            credits={credits}
+            accent={branding.primary_color}
+            canManage={canEditOrg}
+            onChoosePlan={() => setTab("abonnement")}
+          />
         )}
 
-        {/* Mon organisation (société rattachée — gérée par le superadmin) */}
-        {orgLoaded && (
+        {/* Onglets */}
+        <div style={S.tabBar}>
+          {([["societe", "Société"], ["devis", "Devis & marque"], ["abonnement", "Abonnement"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              style={{ ...S.tab, ...(tab === id ? S.tabActive(branding.primary_color) : {}) }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ───────────── Onglet SOCIÉTÉ ───────────── */}
+        {tab === "societe" && orgLoaded && (
           <div style={S.card}>
-            <h2 style={S.cardTitle}>Mon organisation</h2>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+              <h2 style={{ ...S.cardTitle, marginBottom: 0 }}>Mon organisation</h2>
+              {org && canEditOrg && (
+                <button onClick={handleSaveOrg} disabled={orgSaving} style={{ ...S.btnSave, opacity: orgSaving ? 0.7 : 1 }}>
+                  {orgSaving ? "Enregistrement..." : "Enregistrer"}
+                </button>
+              )}
+            </div>
 
             {!org && (
-              <div style={{ fontSize: 13, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "12px 14px" }}>
+              <div style={S.notice}>
                 Votre compte n&apos;est rattaché à aucune société pour le moment. Contactez l&apos;administrateur pour faire rattacher votre compte à une organisation.
               </div>
             )}
@@ -274,7 +292,7 @@ export default function SettingsPage() {
                 <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
                   Votre compte est rattaché à la société suivante. Seul le titulaire du compte (owner) peut modifier ces informations.
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>{org.name}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#1a202c" }}>{org.name}</div>
                 {org.address && <div style={{ fontSize: 13, color: "#64748b" }}>{org.address}</div>}
                 {(org.postal_code || org.city) && (
                   <div style={{ fontSize: 13, color: "#64748b" }}>{[org.postal_code, org.city].filter(Boolean).join(" ")}</div>
@@ -286,31 +304,21 @@ export default function SettingsPage() {
             )}
 
             {org && canEditOrg && (
-              <div>
-                <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
-                  Informations de la société à laquelle votre compte est rattaché (organisation).
+              <>
+                <div style={S.grid}>
+                  <Field label="Raison sociale *" value={orgForm.name} onChange={v => setOrgField("name", v)} placeholder="SARL XYZ Sécurité" />
+                  <Field label="SIRET" value={orgForm.siret} onChange={v => setOrgField("siret", v)} placeholder="123 456 789 00012" />
+                  <Field full label="Adresse" value={orgForm.address} onChange={v => setOrgField("address", v)} placeholder="12 rue de la Paix" />
+                  <Field label="Code postal" value={orgForm.postal_code} onChange={v => setOrgField("postal_code", v)} placeholder="75001" />
+                  <Field label="Ville" value={orgForm.city} onChange={v => setOrgField("city", v)} placeholder="Paris" />
+                  <Field label="Pays" value={orgForm.country} onChange={v => setOrgField("country", v)} placeholder="France" />
+                  <Field label="Téléphone" value={orgForm.phone} onChange={v => setOrgField("phone", v)} placeholder="01 23 45 67 89" type="tel" />
+                  <Field label="Email société" value={orgForm.email} onChange={v => setOrgField("email", v)} placeholder="contact@votresociete.fr" type="email" />
                 </div>
-
-                <Field label="Raison sociale *" value={orgForm.name} onChange={v => setOrgField("name", v)} placeholder="SARL XYZ Sécurité" />
-                <Field label="SIRET" value={orgForm.siret} onChange={v => setOrgField("siret", v)} placeholder="123 456 789 00012" />
-                <Field label="Adresse" value={orgForm.address} onChange={v => setOrgField("address", v)} placeholder="12 rue de la Paix" />
-
-                <div style={{ display: "flex", gap: 8 }}>
-                  <div style={{ flex: "0 0 120px" }}>
-                    <Field label="Code postal" value={orgForm.postal_code} onChange={v => setOrgField("postal_code", v)} placeholder="75001" />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <Field label="Ville" value={orgForm.city} onChange={v => setOrgField("city", v)} placeholder="Paris" />
-                  </div>
-                </div>
-
-                <Field label="Pays" value={orgForm.country} onChange={v => setOrgField("country", v)} placeholder="France" />
-                <Field label="Téléphone" value={orgForm.phone} onChange={v => setOrgField("phone", v)} placeholder="01 23 45 67 89" type="tel" />
-                <Field label="Email société" value={orgForm.email} onChange={v => setOrgField("email", v)} placeholder="contact@votresociete.fr" type="email" />
 
                 {orgMessage && (
                   <div style={{
-                    marginTop: 4, marginBottom: 12, padding: "10px 14px", borderRadius: 8, fontSize: 13,
+                    marginTop: 12, padding: "10px 14px", borderRadius: 8, fontSize: 13,
                     background: orgMessage === "Société mise à jour." ? "#f0fdf4" : "#fef2f2",
                     color:      orgMessage === "Société mise à jour." ? "#166534" : "#b91c1c",
                     border: `1px solid ${orgMessage === "Société mise à jour." ? "#86efac" : "#fca5a5"}`,
@@ -318,233 +326,196 @@ export default function SettingsPage() {
                     {orgMessage}
                   </div>
                 )}
-
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button onClick={handleSaveOrg} disabled={orgSaving} style={{ ...S.btnSave, opacity: orgSaving ? 0.7 : 1 }}>
-                    {orgSaving ? "Enregistrement..." : "Enregistrer la société"}
-                  </button>
-                </div>
-              </div>
+              </>
             )}
           </div>
         )}
 
-        {/* Crédits IA */}
-        {creditsLoaded && credits?.organization && (
-          <CreditsCard credits={credits} primaryColor={branding.primary_color} canManage={canEditOrg} />
+        {/* ───────────── Onglet DEVIS & MARQUE ───────────── */}
+        {tab === "devis" && (
+          <>
+            {message && <div style={msgStyle(message)}>{message}</div>}
+            <div style={S.cols}>
+              {/* Colonne formulaires */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={S.card}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                    <h2 style={{ ...S.cardTitle, marginBottom: 0 }}>Informations société (devis)</h2>
+                    <button onClick={handleSave} disabled={saving} style={{ ...S.btnSave, opacity: saving ? 0.7 : 1 }}>
+                      {saving ? "Enregistrement..." : "Enregistrer"}
+                    </button>
+                  </div>
+                  <div style={S.grid}>
+                    <Field full label="Nom commercial *" value={branding.trade_name} onChange={v => set("trade_name", v)} placeholder="SARL XYZ Sécurité" />
+                    <Field full label="Adresse" value={branding.address} onChange={v => set("address", v)} placeholder="12 rue de la Paix" />
+                    <Field label="Code postal" value={branding.postal_code} onChange={v => set("postal_code", v)} placeholder="75001" />
+                    <Field label="Ville" value={branding.city} onChange={v => set("city", v)} placeholder="Paris" />
+                    <Field label="Pays" value={branding.country} onChange={v => set("country", v)} placeholder="FR" />
+                    <Field label="Téléphone" value={branding.phone} onChange={v => set("phone", v)} placeholder="01 23 45 67 89" type="tel" />
+                    <Field label="Email commercial" value={branding.email} onChange={v => set("email", v)} placeholder="contact@votresociete.fr" type="email" />
+                    <Field label="Site web" value={branding.website} onChange={v => set("website", v)} placeholder="https://votresociete.fr" />
+                    <Field label="SIRET" value={branding.siret} onChange={v => set("siret", v)} placeholder="123 456 789 00012" />
+                    <Field label="N° TVA intracom." value={branding.vat_number} onChange={v => set("vat_number", v)} placeholder="FR12 345678901" />
+                  </div>
+                </div>
+
+                <div style={S.card}>
+                  <h2 style={S.cardTitle}>Identité visuelle</h2>
+                  <div style={S.grid}>
+                    <ImageUpload
+                      label="Logo (haut des devis)"
+                      value={branding.logo_url}
+                      uploading={uploading === "logo_url"}
+                      inputRef={logoRef}
+                      onPick={() => logoRef.current?.click()}
+                      onChange={f => uploadFile(f, "logo_url")}
+                      onClear={() => set("logo_url", "")}
+                      accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                    />
+                    <ImageUpload
+                      label="Image d'en-tête"
+                      value={branding.header_image_url}
+                      uploading={uploading === "header_image_url"}
+                      inputRef={headerRef}
+                      onPick={() => headerRef.current?.click()}
+                      onChange={f => uploadFile(f, "header_image_url")}
+                      onClear={() => set("header_image_url", "")}
+                      accept="image/*"
+                    />
+                    <ImageUpload
+                      label="Signature"
+                      value={branding.signature_url}
+                      uploading={uploading === "signature_url"}
+                      inputRef={signatureRef}
+                      onPick={() => signatureRef.current?.click()}
+                      onChange={f => uploadFile(f, "signature_url")}
+                      onClear={() => set("signature_url", "")}
+                      accept="image/*"
+                    />
+                    <div>
+                      <label style={S.label}>Couleur principale</label>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          type="color"
+                          value={branding.primary_color}
+                          onChange={e => set("primary_color", e.target.value)}
+                          style={{ width: 44, height: 38, borderRadius: 8, border: "1px solid #e2e8f0", cursor: "pointer", padding: 2 }}
+                        />
+                        <input
+                          type="text"
+                          value={branding.primary_color}
+                          onChange={e => set("primary_color", e.target.value)}
+                          placeholder="#1a1a2e"
+                          style={{ ...S.input, marginBottom: 0, flex: 1, minWidth: 0 }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={S.card}>
+                  <h2 style={S.cardTitle}>Paramètres devis par défaut</h2>
+                  <div style={S.grid}>
+                    <div>
+                      <label style={S.label}>Préfixe devis</label>
+                      <input value={branding.quote_prefix} onChange={e => set("quote_prefix", e.target.value)} placeholder="DEV" style={{ ...S.input, marginBottom: 0 }} />
+                    </div>
+                    <div>
+                      <label style={S.label}>Taux TVA (%)</label>
+                      <input type="number" min={0} max={100} value={branding.default_tva_rate} onChange={e => set("default_tva_rate", parseFloat(e.target.value) || 0)} style={{ ...S.input, marginBottom: 0 }} />
+                    </div>
+                    <div>
+                      <label style={S.label}>Validité (jours)</label>
+                      <input type="number" min={1} value={branding.default_validity_days} onChange={e => set("default_validity_days", parseInt(e.target.value) || 30)} style={{ ...S.input, marginBottom: 0 }} />
+                    </div>
+                  </div>
+                  <label style={{ ...S.label, marginTop: 14 }}>Conditions générales (CGV)</label>
+                  <textarea
+                    value={branding.default_conditions}
+                    onChange={e => set("default_conditions", e.target.value)}
+                    placeholder="Texte de vos conditions générales de vente..."
+                    rows={4}
+                    style={{ ...S.input, height: "auto", resize: "vertical", fontFamily: "inherit" }}
+                  />
+                  <label style={S.label}>Pied de page</label>
+                  <textarea
+                    value={branding.footer_text}
+                    onChange={e => set("footer_text", e.target.value)}
+                    placeholder="Ex : SARL XYZ Sécurité — Capital 10 000€ — RCS Paris..."
+                    rows={2}
+                    style={{ ...S.input, height: "auto", resize: "vertical", fontFamily: "inherit", marginBottom: 0 }}
+                  />
+                </div>
+              </div>
+
+              {/* Colonne aperçu (sticky) */}
+              <div style={{ flex: "0 0 340px", minWidth: 0 }}>
+                <div style={{ ...S.card, position: "sticky", top: 16 }}>
+                  <h2 style={S.cardTitle}>Aperçu en-tête devis</h2>
+                  <div style={{ border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden" }}>
+                    <div style={{ height: 6, background: branding.primary_color || "#1a1a2e" }} />
+                    <div style={{ padding: "16px 20px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <div style={{ flex: "0 0 70px" }}>
+                        {branding.logo_url ? (
+                          <Image src={branding.logo_url} alt="Logo" width={70} height={52} style={{ width: "auto", maxWidth: 70, maxHeight: 52, objectFit: "contain" }} />
+                        ) : (
+                          <div style={{
+                            width: 70, height: 52, borderRadius: 6, background: "#f1f5f9",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 10, color: "#94a3b8",
+                          }}>
+                            Logo
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: 15, color: branding.primary_color || "#1a1a2e" }}>
+                          {branding.trade_name || "Nom de votre société"}
+                        </div>
+                        {branding.address && <div style={{ fontSize: 11, color: "#64748b" }}>{branding.address}</div>}
+                        {(branding.postal_code || branding.city) && (
+                          <div style={{ fontSize: 11, color: "#64748b" }}>{[branding.postal_code, branding.city].filter(Boolean).join(" ")}</div>
+                        )}
+                        {branding.phone && <div style={{ fontSize: 11, color: "#64748b" }}>Tél : {branding.phone}</div>}
+                        {branding.email && <div style={{ fontSize: 11, color: "#64748b" }}>{branding.email}</div>}
+                        {branding.siret && <div style={{ fontSize: 10, color: "#94a3b8" }}>SIRET : {branding.siret}</div>}
+                      </div>
+                    </div>
+                    <div style={{ padding: "0 20px 16px", textAlign: "right" }}>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: branding.primary_color || "#1a1a2e" }}>
+                        {branding.quote_prefix || "DEV"}-2026-0001
+                      </div>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>Validité : {branding.default_validity_days} jours · TVA : {branding.default_tva_rate}%</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
         )}
 
-        <div style={S.cols}>
-
-          {/* Colonne gauche */}
-          <div style={{ flex: "0 0 320px" }}>
-
-            {/* Visuels */}
-            <div style={S.card}>
-              <h2 style={S.cardTitle}>Identité visuelle</h2>
-
-              <ImageUpload
-                label="Logo (apparaît en haut des devis)"
-                value={branding.logo_url}
-                uploading={uploading === "logo_url"}
-                inputRef={logoRef}
-                onPick={() => logoRef.current?.click()}
-                onChange={f => uploadFile(f, "logo_url")}
-                onClear={() => set("logo_url", "")}
-                accept="image/png,image/jpeg,image/svg+xml,image/webp"
-              />
-
-              <ImageUpload
-                label="Image d'en-tête (bandeau devis)"
-                value={branding.header_image_url}
-                uploading={uploading === "header_image_url"}
-                inputRef={headerRef}
-                onPick={() => headerRef.current?.click()}
-                onChange={f => uploadFile(f, "header_image_url")}
-                onClear={() => set("header_image_url", "")}
-                accept="image/*"
-              />
-
-              <ImageUpload
-                label="Signature"
-                value={branding.signature_url}
-                uploading={uploading === "signature_url"}
-                inputRef={signatureRef}
-                onPick={() => signatureRef.current?.click()}
-                onChange={f => uploadFile(f, "signature_url")}
-                onClear={() => set("signature_url", "")}
-                accept="image/*"
-              />
-
-              <label style={S.label}>Couleur principale</label>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
-                <input
-                  type="color"
-                  value={branding.primary_color}
-                  onChange={e => set("primary_color", e.target.value)}
-                  style={{ width: 44, height: 36, borderRadius: 8, border: "1px solid #e2e8f0", cursor: "pointer", padding: 2 }}
-                />
-                <input
-                  type="text"
-                  value={branding.primary_color}
-                  onChange={e => set("primary_color", e.target.value)}
-                  placeholder="#1a1a2e"
-                  style={{ ...S.input, marginBottom: 0, width: 110, flex: "none" }}
-                />
-                <div style={{
-                  flex: 1, height: 36, borderRadius: 8,
-                  background: branding.primary_color || "#1a1a2e",
-                  border: "1px solid #e2e8f0",
-                }} />
-              </div>
+        {/* ───────────── Onglet ABONNEMENT ───────────── */}
+        {tab === "abonnement" && creditsLoaded && credits?.organization && (
+          <div id="forfaits" style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <h2 style={{ ...S.cardTitle, marginBottom: 0 }}>Forfaits</h2>
+              {credits.plan && canEditOrg && (
+                <button
+                  onClick={openPortal}
+                  style={{
+                    padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${branding.primary_color}`,
+                    background: "#fff", color: branding.primary_color, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  }}
+                >
+                  Gérer mon abonnement
+                </button>
+              )}
             </div>
-
-            {/* Paramètres devis */}
-            <div style={S.card}>
-              <h2 style={S.cardTitle}>Paramètres devis par défaut</h2>
-
-              <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={S.label}>Préfixe devis</label>
-                  <input
-                    value={branding.quote_prefix}
-                    onChange={e => set("quote_prefix", e.target.value)}
-                    placeholder="DEV"
-                    style={S.input}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={S.label}>Taux TVA (%)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={branding.default_tva_rate}
-                    onChange={e => set("default_tva_rate", parseFloat(e.target.value) || 0)}
-                    style={S.input}
-                  />
-                </div>
-              </div>
-
-              <label style={S.label}>Validité devis (jours)</label>
-              <input
-                type="number"
-                min={1}
-                value={branding.default_validity_days}
-                onChange={e => set("default_validity_days", parseInt(e.target.value) || 30)}
-                style={S.input}
-              />
-
-              <label style={S.label}>Conditions générales (CGV)</label>
-              <textarea
-                value={branding.default_conditions}
-                onChange={e => set("default_conditions", e.target.value)}
-                placeholder="Texte de vos conditions générales de vente..."
-                rows={6}
-                style={{ ...S.input, height: "auto", resize: "vertical", fontFamily: "inherit" }}
-              />
-
-              <label style={S.label}>Pied de page</label>
-              <textarea
-                value={branding.footer_text}
-                onChange={e => set("footer_text", e.target.value)}
-                placeholder="Ex : SARL XYZ Sécurité — Capital 10 000€ — RCS Paris..."
-                rows={3}
-                style={{ ...S.input, height: "auto", resize: "vertical", fontFamily: "inherit" }}
-              />
-            </div>
+            {credits.plans.length > 0
+              ? <PlansGrid plans={credits.plans} currentId={credits.plan?.id ?? null} accent={branding.primary_color} canManage={canEditOrg} />
+              : <div style={{ ...S.notice, marginTop: 14 }}>Aucun forfait disponible pour le moment.</div>}
           </div>
-
-          {/* Colonne droite */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={S.card}>
-              <h2 style={S.cardTitle}>Informations société</h2>
-
-              <Field label="Nom commercial *" value={branding.trade_name} onChange={v => set("trade_name", v)} placeholder="SARL XYZ Sécurité" />
-              <Field label="Adresse" value={branding.address} onChange={v => set("address", v)} placeholder="12 rue de la Paix" />
-
-              <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ flex: "0 0 120px" }}>
-                  <Field label="Code postal" value={branding.postal_code} onChange={v => set("postal_code", v)} placeholder="75001" />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Field label="Ville" value={branding.city} onChange={v => set("city", v)} placeholder="Paris" />
-                </div>
-              </div>
-
-              <Field label="Pays" value={branding.country} onChange={v => set("country", v)} placeholder="FR" />
-              <Field label="Téléphone" value={branding.phone} onChange={v => set("phone", v)} placeholder="01 23 45 67 89" type="tel" />
-              <Field label="Email commercial" value={branding.email} onChange={v => set("email", v)} placeholder="contact@votresociete.fr" type="email" />
-              <Field label="Site web" value={branding.website} onChange={v => set("website", v)} placeholder="https://votresociete.fr" />
-              <Field label="SIRET" value={branding.siret} onChange={v => set("siret", v)} placeholder="123 456 789 00012" />
-              <Field label="N° TVA intracommunautaire" value={branding.vat_number} onChange={v => set("vat_number", v)} placeholder="FR12 345678901" />
-            </div>
-
-            {/* Aperçu devis */}
-            <div style={S.card}>
-              <h2 style={S.cardTitle}>Aperçu en-tête devis</h2>
-              <div style={{
-                border: "1px solid #e2e8f0",
-                borderRadius: 8,
-                overflow: "hidden",
-              }}>
-                {/* Barre couleur */}
-                <div style={{ height: 6, background: branding.primary_color || "#1a1a2e" }} />
-                {/* Header devis */}
-                <div style={{ padding: "16px 20px", display: "flex", gap: 16, alignItems: "flex-start" }}>
-                  {/* Logo */}
-                  <div style={{ flex: "0 0 80px" }}>
-                    {branding.logo_url ? (
-                      <Image src={branding.logo_url} alt="Logo" width={80} height={60} style={{ width: "auto", maxWidth: 80, maxHeight: 60, objectFit: "contain" }} />
-                    ) : (
-                      <div style={{
-                        width: 80, height: 60, borderRadius: 6, background: "#f1f5f9",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 10, color: "#94a3b8", textAlign: "center",
-                      }}>
-                        Logo
-                      </div>
-                    )}
-                  </div>
-                  {/* Infos */}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 800, fontSize: 16, color: branding.primary_color || "#1a1a2e" }}>
-                      {branding.trade_name || "Nom de votre société"}
-                    </div>
-                    {branding.address && <div style={{ fontSize: 11, color: "#64748b" }}>{branding.address}</div>}
-                    {(branding.postal_code || branding.city) && (
-                      <div style={{ fontSize: 11, color: "#64748b" }}>
-                        {[branding.postal_code, branding.city].filter(Boolean).join(" ")}
-                      </div>
-                    )}
-                    {branding.phone && <div style={{ fontSize: 11, color: "#64748b" }}>Tél : {branding.phone}</div>}
-                    {branding.email && <div style={{ fontSize: 11, color: "#64748b" }}>{branding.email}</div>}
-                    {branding.siret && <div style={{ fontSize: 10, color: "#94a3b8" }}>SIRET : {branding.siret}</div>}
-                  </div>
-                  {/* Devis label */}
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 18, fontWeight: 800, color: branding.primary_color || "#1a1a2e" }}>
-                      {branding.quote_prefix || "DEV"}-2026-0001
-                    </div>
-                    <div style={{ fontSize: 11, color: "#64748b" }}>Validité : {branding.default_validity_days} jours</div>
-                    <div style={{ fontSize: 11, color: "#64748b" }}>TVA : {branding.default_tva_rate}%</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bouton bas de page */}
-        <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{ ...S.btnSave, opacity: saving ? 0.7 : 1 }}
-          >
-            {saving ? "Enregistrement..." : "Enregistrer les paramètres"}
-          </button>
-        </div>
+        )}
       </div>
     </div>
   )
@@ -605,134 +576,115 @@ function PlansGrid({ plans, currentId, accent, canManage }: { plans: Plan[]; cur
   )
 }
 
-function CreditsCard({ credits, primaryColor, canManage }: { credits: Credits; primaryColor: string; canManage: boolean }) {
-  const { plan, monthly_credits, consumed, remaining, plans } = credits
-  const accent = primaryColor || "#1a1a2e"
+// Barre "tableau de bord" en haut de /settings : abonnement actuel + essais gratuits / crédits restants.
+// Compacte et toujours visible. Tous les comptes la voient ; seuls les owners (canManage) ont les actions.
+function AccountSummary({ credits, accent: rawAccent, canManage, onChoosePlan }: {
+  credits: Credits; accent: string; canManage: boolean; onChoosePlan: () => void
+}) {
+  const { plan, monthly_credits, remaining } = credits
+  const accent = rawAccent || "#1a1a2e"
+  const onTrial = !plan
 
-  // Essai gratuit : organisation sans forfait → jauge sur les 5 devis offerts.
-  if (!plan) {
-    const used = credits.free_devis_used ?? 0
-    const limit = credits.free_devis_limit ?? 5
-    const exhausted = used >= limit
-    const freePct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100))
-    return (
-      <div style={S.card}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-          <h2 style={S.cardTitle}>Crédits IA</h2>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 999, padding: "2px 10px" }}>
-            Essai gratuit
-          </span>
-        </div>
-        <div style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>
-          Profitez de <strong>{limit} devis générés par IA offerts</strong>. Souscrivez un forfait pour continuer ensuite.
-        </div>
-        <div style={{ height: 12, borderRadius: 999, background: "#f1f5f9", overflow: "hidden", marginBottom: 10 }}>
-          <div style={{ height: "100%", width: `${freePct}%`, background: exhausted ? "#dc2626" : accent, borderRadius: 999, transition: "width .3s" }} />
-        </div>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: exhausted ? 14 : 0 }}>
-          <Stat label="Devis IA utilisés" value={`${used} / ${limit}`} />
-          <Stat label="Restants" value={`${Math.max(0, limit - used)}`} color={exhausted ? "#dc2626" : "#166534"} />
-        </div>
-        {exhausted && (
-          <div style={{ fontSize: 13, borderRadius: 8, padding: "10px 14px", background: "#fef2f2", color: "#b91c1c", border: "1px solid #fca5a5" }}>
-            Vous avez utilisé vos {limit} devis offerts. Choisissez un forfait ci-dessous pour continuer à générer par IA.
-          </div>
-        )}
-        {plans.length > 0 && <PlansGrid plans={plans} currentId={null} accent={accent} canManage={canManage} />}
-      </div>
-    )
-  }
+  // Essai gratuit (org sans forfait) : jauge sur les N devis IA offerts.
+  const freeUsed = credits.free_devis_used ?? 0
+  const freeLimit = credits.free_devis_limit ?? 5
+  const freeRemaining = Math.max(0, freeLimit - freeUsed)
 
-  const pct = monthly_credits > 0 ? Math.min(100, Math.round((consumed / monthly_credits) * 100)) : 0
-  const low = remaining <= 0
-  const warn = !low && pct >= 80
-  const barColor = low ? "#dc2626" : warn ? "#f59e0b" : accent
-
-  const periodLabel = new Date(credits.period_start).toLocaleDateString("fr-FR", {
-    month: "long", year: "numeric",
-  })
+  // Jauge en logique "restants" : pleine = il en reste beaucoup, vide = épuisé.
+  const fillPct = onTrial
+    ? Math.round((freeRemaining / Math.max(1, freeLimit)) * 100)
+    : monthly_credits > 0 ? Math.round((remaining / monthly_credits) * 100) : 0
+  const exhausted = onTrial ? freeRemaining <= 0 : remaining <= 0
+  const warn = !exhausted && fillPct <= 20
+  const barColor = exhausted ? "#dc2626" : warn ? "#f59e0b" : accent
 
   return (
-    <div style={S.card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-        <h2 style={S.cardTitle}>Crédits IA</h2>
-        <span style={{ fontSize: 12, color: "#94a3b8" }}>
-          Forfait actuel : <strong style={{ color: "#1a202c" }}>{plan?.name ?? "—"}</strong>
-          {plan ? ` · ${plan.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} € / mois` : ""}
-        </span>
-      </div>
-
-      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>
-        Période en cours : <strong>{periodLabel}</strong>. 1 crédit = 1 000 tokens. Le compteur est remis à zéro le 1er de chaque mois.
-      </div>
-
-      {/* Jauge */}
-      <div style={{ height: 12, borderRadius: 999, background: "#f1f5f9", overflow: "hidden", marginBottom: 10 }}>
-        <div style={{ height: "100%", width: `${pct}%`, background: barColor, borderRadius: 999, transition: "width .3s" }} />
-      </div>
-
-      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: low || warn ? 14 : 0 }}>
-        <Stat label="Consommés" value={`${consumed.toLocaleString("fr-FR")} / ${monthly_credits.toLocaleString("fr-FR")}`} />
-        <Stat label="Restants" value={remaining.toLocaleString("fr-FR")} color={low ? "#dc2626" : "#166534"} />
-        <Stat label="Utilisation" value={`${pct} %`} />
-      </div>
-
-      {(low || warn) && (
-        <div style={{
-          fontSize: 13, borderRadius: 8, padding: "10px 14px",
-          background: low ? "#fef2f2" : "#fffbeb",
-          color:      low ? "#b91c1c" : "#92400e",
-          border: `1px solid ${low ? "#fca5a5" : "#fde68a"}`,
-        }}>
-          {low
-            ? "Vous avez épuisé vos crédits IA pour ce mois. Passez à un forfait supérieur pour continuer à générer des devis par IA."
-            : "Vous approchez de la limite mensuelle de votre forfait."}
+    <div style={S.subBar}>
+      {/* Abonnement */}
+      <div style={{ minWidth: 180 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.6 }}>Mon abonnement</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#1a202c", marginTop: 2, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {onTrial ? "Essai gratuit" : plan!.name}
+          {onTrial
+            ? <span style={badgeStyle("#92400e", "#fffbeb", "#fde68a")}>Sans forfait</span>
+            : <span style={badgeStyle("#166534", "#f0fdf4", "#86efac")}>Actif</span>}
         </div>
-      )}
+        <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+          {onTrial ? `${freeLimit} devis IA offerts` : `${plan!.price.toLocaleString("fr-FR", { minimumFractionDigits: 2 })} € / mois`}
+        </div>
+      </div>
 
-      {plans.length > 0 && <PlansGrid plans={plans} currentId={plan?.id ?? null} accent={accent} canManage={canManage} />}
+      {/* Jauge + chiffre */}
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>
+            {onTrial ? "Essais restants" : "Crédits restants"}
+          </span>
+          <span style={{ fontSize: 15, fontWeight: 800, color: exhausted ? "#dc2626" : "#166534" }}>
+            {onTrial ? `${freeRemaining} / ${freeLimit}` : `${remaining.toLocaleString("fr-FR")} / ${monthly_credits.toLocaleString("fr-FR")}`}
+          </span>
+        </div>
+        <div style={{ height: 10, borderRadius: 999, background: "#f1f5f9", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${fillPct}%`, background: barColor, borderRadius: 999, transition: "width .3s" }} />
+        </div>
+        {(exhausted || warn) && (
+          <div style={{ fontSize: 12, marginTop: 6, color: exhausted ? "#b91c1c" : "#92400e" }}>
+            {onTrial
+              ? (exhausted ? `Essai gratuit épuisé — choisissez un forfait pour continuer.` : "Vous approchez de la fin de l'essai gratuit.")
+              : (exhausted ? "Crédits du mois épuisés — passez à un forfait supérieur." : "Vous approchez de la limite mensuelle.")}
+          </div>
+        )}
+      </div>
 
-      {canManage && (
-        <button
-          onClick={openPortal}
-          style={{
-            marginTop: 16, padding: "9px 14px", borderRadius: 8, border: `1.5px solid ${accent}`,
-            background: "#fff", color: accent, fontSize: 13, fontWeight: 700, cursor: "pointer",
-          }}
-        >
-          Gérer mon abonnement
-        </button>
-      )}
+      {/* Action */}
+      <div style={{ flexShrink: 0 }}>
+        {canManage ? (
+          onTrial ? (
+            <button onClick={onChoosePlan} style={{
+              padding: "10px 16px", borderRadius: 8, border: "none",
+              background: accent, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+            }}>
+              Choisir un forfait
+            </button>
+          ) : (
+            <button onClick={openPortal} style={{
+              padding: "10px 16px", borderRadius: 8, border: `1.5px solid ${accent}`,
+              background: "#fff", color: accent, fontSize: 13, fontWeight: 700, cursor: "pointer",
+            }}>
+              Gérer mon abonnement
+            </button>
+          )
+        ) : (
+          <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>
+            Lecture seule
+          </span>
+        )}
+      </div>
     </div>
   )
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div>
-      <div style={{ fontSize: 11, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 800, color: color ?? "#1a202c" }}>{value}</div>
-    </div>
-  )
+function badgeStyle(color: string, bg: string, border: string): React.CSSProperties {
+  return { fontSize: 11, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, borderRadius: 999, padding: "2px 10px" }
 }
 
 function Field({
-  label, value, onChange, placeholder, type = "text",
+  label, value, onChange, placeholder, type = "text", full = false,
 }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string; full?: boolean
 }) {
   return (
-    <>
+    <div style={full ? { gridColumn: "1 / -1" } : undefined}>
       <label style={S.label}>{label}</label>
       <input
         type={type}
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        style={S.input}
+        style={{ ...S.input, marginBottom: 0 }}
         autoComplete="off"
       />
-    </>
+    </div>
   )
 }
 
@@ -820,6 +772,29 @@ const S = {
   card: {
     background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0",
     boxShadow: "0 1px 4px rgba(0,0,0,0.06)", padding: 24, marginBottom: 20,
+  } as React.CSSProperties,
+  subBar: {
+    background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.06)", padding: "16px 20px", marginBottom: 16,
+    display: "flex", alignItems: "center", gap: 28, flexWrap: "wrap" as const,
+  } as React.CSSProperties,
+  tabBar: {
+    display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid #e2e8f0",
+  } as React.CSSProperties,
+  tab: {
+    padding: "10px 18px", background: "transparent", border: "none",
+    borderBottom: "2px solid transparent", marginBottom: -1,
+    fontSize: 14, fontWeight: 600, color: "#64748b", cursor: "pointer",
+  } as React.CSSProperties,
+  tabActive: (accent: string): React.CSSProperties => ({
+    color: "#1a202c", borderBottom: `2px solid ${accent || "#1a1a2e"}`,
+  }),
+  grid: {
+    display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14,
+  } as React.CSSProperties,
+  notice: {
+    fontSize: 13, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a",
+    borderRadius: 8, padding: "12px 14px",
   } as React.CSSProperties,
   cardTitle: { margin: "0 0 16px", fontSize: 15, fontWeight: 700, color: "#1a202c" },
   label: { display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 4 } as React.CSSProperties,
