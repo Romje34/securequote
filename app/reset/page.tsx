@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 
 const supabase = createClient()
@@ -57,9 +58,9 @@ export default function ResetPage() {
             <p style={S.errorBanner}>
               Lien invalide ou expiré. Relancez une demande de réinitialisation depuis la page de connexion.
             </p>
-            <a href="/login" style={{ ...S.btn, display: "block", textAlign: "center", textDecoration: "none", marginTop: 12 }}>
+            <Link href="/login" style={{ ...S.btn, display: "block", textAlign: "center", textDecoration: "none", marginTop: 12 }}>
               Retour à la connexion
-            </a>
+            </Link>
           </>
         ) : (
           <>

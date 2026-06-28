@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
@@ -165,7 +166,7 @@ export default function AdminPage() {
           <div style={{ fontSize: 32, marginBottom: 12 }}>🔒</div>
           <div style={{ fontWeight: 700, color: "#1a202c", marginBottom: 6 }}>Accès refusé</div>
           <div style={{ fontSize: 13, color: "#64748b", marginBottom: 20 }}>Cette page est réservée aux super-administrateurs.</div>
-          <a href="/dashboard" style={S.backLink}>← Retour au tableau de bord</a>
+          <Link href="/dashboard" style={S.backLink}>← Retour au tableau de bord</Link>
         </div>
       </div>
     </div>
@@ -186,12 +187,12 @@ export default function AdminPage() {
           <span style={S.adminBadge}>Super Admin</span>
         </div>
         <nav style={S.nav}>
-          <button onClick={() => { window.location.href = "/account" }} style={S.btnLogout}>
+          <Link href="/account" style={{ ...S.btnLogout, textDecoration: "none", display: "inline-block" }}>
             Mon compte
-          </button>
-          <button onClick={() => { window.location.href = "/admin/accounts" }} style={S.btnLogout}>
+          </Link>
+          <Link href="/admin/accounts" style={{ ...S.btnLogout, textDecoration: "none", display: "inline-block" }}>
             Journal des utilisateurs
-          </button>
+          </Link>
           <button onClick={() => sb.auth.signOut().then(() => { window.location.href = "/login" })} style={S.btnLogout}>
             Déconnexion
           </button>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, Suspense } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import { isWon } from "@/lib/quote"
 import type { User } from "@supabase/supabase-js"
@@ -216,11 +217,11 @@ function QuotesPageInner() {
     <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <header style={{ background: "#1a1a2e", padding: "16px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <a href="/companies" style={{ color: "#94a3b8", fontSize: 13, textDecoration: "none" }}>← Tableau de bord</a>
+          <Link href="/companies" style={{ color: "#94a3b8", fontSize: 13, textDecoration: "none" }}>← Tableau de bord</Link>
           <span style={{ color: "#334155" }}>|</span>
           <span style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>Mes devis</span>
         </div>
-        <a href="/account" style={{ color: "#93c5fd", fontSize: 13, textDecoration: "none", fontWeight: 600 }}>Mon compte</a>
+        <Link href="/account" style={{ color: "#93c5fd", fontSize: 13, textDecoration: "none", fontWeight: 600 }}>Mon compte</Link>
       </header>
 
       <div style={{ maxWidth: 1240, margin: "0 auto", padding: "24px 16px" }}>

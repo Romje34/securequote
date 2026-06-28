@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 import ContactAdmin from "@/components/ContactAdmin"
@@ -92,7 +93,7 @@ export default function AccountPage() {
           </div>
         </div>
         <nav style={S.nav}>
-          <button onClick={() => { window.location.href = "/dashboard" }} style={S.navBtn}>← Retour</button>
+          <Link href="/dashboard" style={{ ...S.navBtn, textDecoration: "none", display: "inline-block" }}>← Retour</Link>
         </nav>
       </header>
 
