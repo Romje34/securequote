@@ -17,13 +17,13 @@ export async function POST(request: Request) {
   const { plan_id } = await request.json().catch(() => ({}))
   if (!plan_id) return NextResponse.json({ error: 'plan_id requis' }, { status: 400 })
 
-  // Seul un owner (integrator) rattaché à une organisation peut souscrire.
-  const { data: profile } = await db
-    .from('profiles')
-    .select('organization_id, user_type')
-    .eq('id', user.id)
-    .single()
+  // Profil (gating owner) et forfait sont indépendants → requêtes en parallèle.
+  const [{ data: profile }, { data: plan }] = await Promise.all([
+    db.from('profiles').select('organization_id, user_type').eq('id', user.id).single(),
+    db.from('plans').select('id, name, stripe_price_id').eq('id', plan_id).maybeSingle(),
+  ])
 
+  // Seul un owner (integrator) rattaché à une organisation peut souscrire.
   if (profile?.user_type !== 'integrator') {
     return NextResponse.json({ error: 'Réservé au titulaire du compte' }, { status: 403 })
   }
@@ -32,11 +32,6 @@ export async function POST(request: Request) {
   }
 
   // Forfait + prix Stripe associé.
-  const { data: plan } = await db
-    .from('plans')
-    .select('id, name, stripe_price_id')
-    .eq('id', plan_id)
-    .maybeSingle()
   if (!plan) return NextResponse.json({ error: 'Forfait introuvable' }, { status: 404 })
   if (!plan.stripe_price_id) {
     return NextResponse.json({ error: 'Forfait non disponible à la vente' }, { status: 409 })

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
@@ -64,7 +65,7 @@ export default function AdminAccountsPage() {
           </div>
         </div>
         <nav style={S.nav}>
-          <button onClick={() => { window.location.href = "/admin" }} style={S.navBtn}>← Administration</button>
+          <Link href="/admin" style={{ ...S.navBtn, textDecoration: "none", display: "inline-block" }}>← Administration</Link>
         </nav>
       </header>
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import Image from "next/image"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
@@ -192,7 +193,7 @@ export default function PremiumPage() {
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-          <a href="/dashboard" style={{
+          <Link href="/dashboard" style={{
             color: G.textFaint, fontSize: 12, textDecoration: "none",
             display: "flex", alignItems: "center", gap: 6,
             padding: "6px 10px",
@@ -201,7 +202,7 @@ export default function PremiumPage() {
             transition: "color 0.2s",
           }}>
             ← Dashboard
-          </a>
+          </Link>
           <div style={{ width: 1, height: 20, background: G.border }} />
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{

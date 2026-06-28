@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react"
 import { use } from "react"
+import Link from "next/link"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -454,7 +455,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       <button onClick={() => setReloadTick(t => t + 1)} style={{ padding: "8px 20px", background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
         Réessayer
       </button>
-      <a href="/companies" style={{ color: "#94a3b8", fontSize: 13 }}>← Retour</a>
+      <Link href="/companies" style={{ color: "#94a3b8", fontSize: 13 }}>← Retour</Link>
     </div>
   )
 
@@ -513,7 +514,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       {/* ── Header ── */}
       <header style={S.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <a href="/companies" style={S.backLink}>← Retour</a>
+          <Link href="/companies" style={S.backLink}>← Retour</Link>
           <span style={{ color: "#334155", fontSize: 13 }}>|</span>
           <span style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>{header.quote_number}</span>
           <span style={{
@@ -747,10 +748,10 @@ function UpgradeModal({ info, onClose }: { info: UpgradeInfo; onClose: () => voi
             style={{ padding: "10px 18px", background: "#f1f5f9", color: "#475569", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
             Plus tard
           </button>
-          <a href="/settings"
+          <Link href="/settings"
             style={{ padding: "10px 22px", background: "linear-gradient(135deg,#7c3aed,#4f46e5)", color: "#fff", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
             Choisir un forfait →
-          </a>
+          </Link>
         </div>
       </div>
     </div>

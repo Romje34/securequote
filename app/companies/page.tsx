@@ -353,7 +353,7 @@ export default function CompaniesPage() {
 
   if (!user) return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <a href="/login" style={{ color: "#3b82f6", fontWeight: 600 }}>Se connecter</a>
+      <Link href="/login" style={{ color: "#3b82f6", fontWeight: 600 }}>Se connecter</Link>
     </div>
   )
 

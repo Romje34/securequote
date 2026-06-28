@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useRef } from "react"
 import Image from "next/image"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 
 const sb = createClient()
 
 // Démarre un abonnement Stripe pour un forfait et redirige vers la page de paiement.
+// Lève en cas d'échec pour que l'appelant puisse réinitialiser son état "en cours".
 async function startCheckout(planId: string) {
   const res = await fetch("/api/billing/checkout", {
     method: "POST",
@@ -17,6 +19,7 @@ async function startCheckout(planId: string) {
   const data = await res.json().catch(() => ({}))
   if (res.ok && data.url) { window.location.href = data.url; return }
   alert(data.error || "Le paiement n'est pas disponible pour le moment.")
+  throw new Error(data.error || "checkout indisponible")
 }
 
 // Ouvre le portail client Stripe (gérer / résilier l'abonnement).
@@ -25,6 +28,26 @@ async function openPortal() {
   const data = await res.json().catch(() => ({}))
   if (res.ok && data.url) { window.location.href = data.url; return }
   alert(data.error || "Gestion de l'abonnement indisponible.")
+  throw new Error(data.error || "portail indisponible")
+}
+
+// Bouton qui passe en "en cours…" dès le clic et le reste jusqu'à la redirection
+// (ou jusqu'à l'échec). Donne un retour visuel immédiat sur les actions Stripe lentes.
+function RedirectButton({
+  onAction, label, pendingLabel, style,
+}: {
+  onAction: () => Promise<void>; label: string; pendingLabel: string; style: React.CSSProperties
+}) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <button
+      onClick={async () => { setBusy(true); try { await onAction() } catch { setBusy(false) } }}
+      disabled={busy}
+      style={{ ...style, opacity: busy ? 0.75 : 1, cursor: busy ? "wait" : "pointer" }}
+    >
+      {busy ? pendingLabel : label}
+    </button>
+  )
 }
 
 type Branding = {
@@ -222,6 +245,9 @@ export default function SettingsPage() {
 
   return (
     <div style={S.page}>
+      {/* Préconnexion aux domaines Stripe : la redirection vers le paiement part plus vite. */}
+      <link rel="preconnect" href="https://checkout.stripe.com" />
+      <link rel="preconnect" href="https://billing.stripe.com" />
       <header style={S.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ ...S.logo, background: branding.primary_color || "#1a1a2e" }}>S</div>
@@ -231,9 +257,9 @@ export default function SettingsPage() {
           </div>
         </div>
         <nav style={S.nav}>
-          <a href="/dashboard" style={S.navLink}>Tableau de bord</a>
-          <a href="/companies" style={S.navLink}>Mes sociétés</a>
-          <a href="/account" style={S.navLink}>Mon compte</a>
+          <Link href="/dashboard" style={S.navLink}>Tableau de bord</Link>
+          <Link href="/companies" style={S.navLink}>Mes sociétés</Link>
+          <Link href="/account" style={S.navLink}>Mon compte</Link>
           <button
             onClick={() => sb.auth.signOut().then(() => { window.location.href = "/login" })}
             style={S.btnLogout}
@@ -500,15 +526,15 @@ export default function SettingsPage() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
               <h2 style={{ ...S.cardTitle, marginBottom: 0 }}>Forfaits</h2>
               {credits.plan && canEditOrg && (
-                <button
-                  onClick={openPortal}
+                <RedirectButton
+                  onAction={openPortal}
+                  label="Gérer mon abonnement"
+                  pendingLabel="Ouverture…"
                   style={{
                     padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${branding.primary_color}`,
                     background: "#fff", color: branding.primary_color, fontSize: 13, fontWeight: 700, cursor: "pointer",
                   }}
-                >
-                  Gérer mon abonnement
-                </button>
+                />
               )}
             </div>
             {credits.plans.length > 0
@@ -553,15 +579,15 @@ function PlansGrid({ plans, currentId, accent, canManage }: { plans: Plan[]; cur
                 {p.monthly_credits.toLocaleString("fr-FR")} crédits / mois
               </div>
               {canManage && !current && (
-                <button
-                  onClick={() => startCheckout(p.id)}
+                <RedirectButton
+                  onAction={() => startCheckout(p.id)}
+                  label="S'abonner"
+                  pendingLabel="Redirection…"
                   style={{
                     marginTop: 12, padding: "8px 12px", borderRadius: 8, border: "none",
                     background: accent, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
                   }}
-                >
-                  S&apos;abonner
-                </button>
+                />
               )}
             </div>
           )
@@ -647,12 +673,15 @@ function AccountSummary({ credits, accent: rawAccent, canManage, onChoosePlan }:
               Choisir un forfait
             </button>
           ) : (
-            <button onClick={openPortal} style={{
-              padding: "10px 16px", borderRadius: 8, border: `1.5px solid ${accent}`,
-              background: "#fff", color: accent, fontSize: 13, fontWeight: 700, cursor: "pointer",
-            }}>
-              Gérer mon abonnement
-            </button>
+            <RedirectButton
+              onAction={openPortal}
+              label="Gérer mon abonnement"
+              pendingLabel="Ouverture…"
+              style={{
+                padding: "10px 16px", borderRadius: 8, border: `1.5px solid ${accent}`,
+                background: "#fff", color: accent, fontSize: 13, fontWeight: 700, cursor: "pointer",
+              }}
+            />
           )
         ) : (
           <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>
