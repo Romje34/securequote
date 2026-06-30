@@ -27,27 +27,6 @@ const ITEM_SCHEMA = {
   additionalProperties: false,
 }
 
-const FULL_SCHEMA = {
-  type: 'object',
-  properties: {
-    quote_object: { type: 'string', description: "Texte professionnel pour l'objet du devis" },
-    chapters: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'Titre du chapitre (métier ou lot)' },
-          items: { type: 'array', items: ITEM_SCHEMA },
-        },
-        required: ['title', 'items'],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ['quote_object', 'chapters'],
-  additionalProperties: false,
-}
-
 const CHAPTER_SCHEMA = {
   type: 'object',
   properties: {
@@ -194,40 +173,87 @@ export async function POST(request: Request) {
   const blocked = await quotaBlock(user.id)
   if (blocked) return blocked
 
-  let userPrompt: string
-  let schema: Record<string, unknown>
-
-  if (mode === 'chapter') {
-    const chapterTitle: string = (body.chapter_title ?? '').trim()
-    if (!chapterTitle) {
-      return NextResponse.json({ error: 'chapter_title requis' }, { status: 400 })
-    }
-    const context: string = (body.project_context ?? '').trim()
-    const existing: string[] = Array.isArray(body.existing_items) ? body.existing_items : []
-    userPrompt = `Génère les lignes de devis pour le chapitre « ${chapterTitle} ».`
-      + (context ? `\nContexte du projet : ${context}` : '')
-      + (existing.length ? `\nLignes déjà présentes (ne pas dupliquer) :\n- ${existing.join('\n- ')}` : '')
-      + `\nPropose des lignes complémentaires, réalistes et complètes (matériel + main d'œuvre si pertinent).`
-    schema = CHAPTER_SCHEMA
-  } else {
+  // Mode « full » : génération complète en STREAMING NDJSON (une ligne JSON par
+  // chapitre / ligne) → le client affiche le devis qui se construit en direct,
+  // sans attendre la fin de la génération.
+  if (mode !== 'chapter') {
     const description: string = (body.description ?? '').trim()
     if (!description) {
       return NextResponse.json({ error: 'description requise' }, { status: 400 })
     }
-    userPrompt = `Génère une structure complète de devis pour ce projet :\n« ${description} »\n`
-      + `Organise en chapitres par métier/lot, avec pour chaque chapitre des lignes détaillées (matériel et main d'œuvre).`
-    schema = FULL_SCHEMA
+    const userPrompt =
+      `Génère une structure complète de devis pour ce projet :\n« ${description} »\n`
+      + `Organise en chapitres par métier/lot, avec pour chaque chapitre des lignes détaillées (matériel et main d'œuvre).\n\n`
+      + `IMPORTANT — Format de sortie : émets UNIQUEMENT une séquence de lignes JSON (NDJSON), une par ligne, sans aucun texte autour ni bloc de code.\n`
+      + `1) D'abord exactement : {"t":"object","text":"<objet professionnel du devis>"}\n`
+      + `2) Puis, pour chaque chapitre dans l'ordre : {"t":"chapter","i":<index entier 0,1,2…>,"title":"<titre du chapitre>"}\n`
+      + `3) Juste après son en-tête, les lignes du chapitre : {"t":"item","c":<index du chapitre>,"designation":"…","reference":"","brand":"","unit":"U","quantity":1,"category":"materiel"}\n`
+      + `category vaut materiel, main_oeuvre ou forfait. N'ajoute aucune clé supplémentaire et n'invente pas de prix.`
+
+    const encoder = new TextEncoder()
+    const quoteId = typeof body.quote_id === 'string' ? body.quote_id : null
+    const userId = user.id
+
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          const llm = client.messages.stream({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 8192,
+            system: SYSTEM_PROMPT,
+            thinking: { type: 'disabled' },
+            output_config: { effort: 'medium' },
+            messages: [{ role: 'user', content: userPrompt }],
+          })
+          for await (const event of llm) {
+            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+              controller.enqueue(encoder.encode(event.delta.text))
+            }
+          }
+          const final = await llm.finalMessage()
+          await recordUsage({
+            userId,
+            mode: 'full',
+            quoteId,
+            inputTokens: final.usage?.input_tokens ?? 0,
+            outputTokens: final.usage?.output_tokens ?? 0,
+          })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Erreur IA'
+          controller.enqueue(encoder.encode('\n' + JSON.stringify({ t: 'error', message: msg }) + '\n'))
+        } finally {
+          controller.close()
+        }
+      },
+    })
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+      },
+    })
   }
+
+  // Mode « chapter » : complète un chapitre existant, JSON structuré non streamé.
+  const chapterTitle: string = (body.chapter_title ?? '').trim()
+  if (!chapterTitle) {
+    return NextResponse.json({ error: 'chapter_title requis' }, { status: 400 })
+  }
+  const context: string = (body.project_context ?? '').trim()
+  const existing: string[] = Array.isArray(body.existing_items) ? body.existing_items : []
+  const userPrompt = `Génère les lignes de devis pour le chapitre « ${chapterTitle} ».`
+    + (context ? `\nContexte du projet : ${context}` : '')
+    + (existing.length ? `\nLignes déjà présentes (ne pas dupliquer) :\n- ${existing.join('\n- ')}` : '')
+    + `\nPropose des lignes complémentaires, réalistes et complètes (matériel + main d'œuvre si pertinent).`
 
   try {
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 8192,
       system: SYSTEM_PROMPT,
-      // Génération structurée rapide : pas de thinking (réduit la latence),
-      // effort medium pour garder une nomenclature soignée.
       thinking: { type: 'disabled' },
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: CHAPTER_SCHEMA } },
       messages: [{ role: 'user', content: userPrompt }],
     })
 
@@ -236,7 +262,7 @@ export async function POST(request: Request) {
 
     await recordUsage({
       userId: user.id,
-      mode,
+      mode: 'chapter',
       quoteId: typeof body.quote_id === 'string' ? body.quote_id : null,
       inputTokens: message.usage?.input_tokens ?? 0,
       outputTokens: message.usage?.output_tokens ?? 0,
