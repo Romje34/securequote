@@ -31,6 +31,17 @@ type Chapter = {
   items: Item[]
 }
 
+// Lignes / chapitres en cours de génération IA (aperçu en direct, avant persistance).
+type AiItem = {
+  designation: string
+  reference: string
+  brand: string
+  unit: string
+  quantity: number
+  category: string
+}
+type AiPreviewChapter = { title: string; items: AiItem[] }
+
 type QuoteHeader = {
   quote_number: string
   status: string
@@ -154,6 +165,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   const [aiGenOpen, setAiGenOpen] = useState(false)
   const [aiGenDesc, setAiGenDesc] = useState("")
   const [aiGenLoading, setAiGenLoading] = useState(false)
+  const [aiPreview, setAiPreview] = useState<AiPreviewChapter[]>([])
   const [upgrade, setUpgrade] = useState<UpgradeInfo | null>(null)
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000) }
@@ -285,17 +297,20 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
   }
 
   // Génère un devis complet (chapitres + lignes) à partir d'une description libre.
+  // Lit un flux NDJSON (une ligne JSON par chapitre/ligne) et affiche le devis
+  // en cours de construction en direct, puis persiste le tout en un appel groupé.
   async function generateFullQuote() {
     const desc = aiGenDesc.trim()
     if (!desc) return
     setAiGenLoading(true)
+    setAiPreview([])
     try {
       const res = await fetch("/api/ai/quote-suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "full", description: desc }),
+        body: JSON.stringify({ mode: "full", description: desc, quote_id: id }),
       })
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const b = await res.json().catch(() => ({}))
         if (res.status === 402) {
           setUpgrade({ error_code: b.error_code ?? "insufficient_credits", plans: b.plans ?? [] })
@@ -304,12 +319,65 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         showToast(`Erreur IA : ${b.error ?? res.status}`)
         return
       }
-      const data = await res.json()
+
+      let quoteObject = ""
+      let aiError = ""
+      const built: AiPreviewChapter[] = []
+      const refreshPreview = () =>
+        setAiPreview(built.filter(Boolean).map(c => ({ title: c.title, items: [...c.items] })))
+
+      const handleLine = (line: string) => {
+        const trimmed = line.trim()
+        if (!trimmed) return
+        let obj: Record<string, unknown>
+        try { obj = JSON.parse(trimmed) } catch { return }
+        if (obj.t === "object") {
+          quoteObject = String(obj.text ?? "")
+        } else if (obj.t === "chapter") {
+          const ci = Number(obj.i) || 0
+          built[ci] = { title: String(obj.title ?? "Chapitre"), items: built[ci]?.items ?? [] }
+          refreshPreview()
+        } else if (obj.t === "item") {
+          const ci = Number(obj.c) || 0
+          if (!built[ci]) built[ci] = { title: "Chapitre", items: [] }
+          built[ci].items.push({
+            designation: String(obj.designation ?? ""),
+            reference: typeof obj.reference === "string" ? obj.reference : "",
+            brand: typeof obj.brand === "string" ? obj.brand : "",
+            unit: typeof obj.unit === "string" && obj.unit ? obj.unit : "U",
+            quantity: typeof obj.quantity === "number" ? obj.quantity : 1,
+            category: typeof obj.category === "string" ? obj.category : "materiel",
+          })
+          refreshPreview()
+        } else if (obj.t === "error") {
+          aiError = String(obj.message ?? "Erreur IA")
+        }
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let nl: number
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          handleLine(buffer.slice(0, nl))
+          buffer = buffer.slice(nl + 1)
+        }
+      }
+      if (buffer.trim()) handleLine(buffer)
+
+      if (aiError) { showToast(`Erreur IA : ${aiError}`); return }
+
+      const chaptersPayload = built.filter(Boolean).map(c => ({ title: c.title, items: c.items }))
+      if (chaptersPayload.length === 0) { showToast("Aucun contenu généré par l'IA"); return }
 
       // Objet du devis : ne remplit que s'il est vide.
-      if (data.quote_object && header && !header.title.trim()) {
-        updateHeader("title", data.quote_object)
-        await saveHeader({ title: data.quote_object })
+      if (quoteObject && header && !header.title.trim()) {
+        updateHeader("title", quoteObject)
+        await saveHeader({ title: quoteObject })
       }
 
       // Persistance groupée : un seul appel insère tous les chapitres + lignes
@@ -317,7 +385,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
       const bres = await fetch(`/api/quotes/${id}/bulk`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ start_position: chapters.length, chapters: data.chapters ?? [] }),
+        body: JSON.stringify({ start_position: chapters.length, chapters: chaptersPayload }),
       })
       if (!bres.ok) {
         const b = await bres.json().catch(() => ({}))
@@ -335,6 +403,7 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
 
       setAiGenOpen(false)
       setAiGenDesc("")
+      setAiPreview([])
       showToast("Devis généré par l'IA ✦")
     } finally {
       setAiGenLoading(false)
@@ -628,7 +697,11 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                   style={{ width: "100%", padding: "10px 12px", border: "1px solid #c4b5fd", borderRadius: 8, fontSize: 13, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box", outline: "none", background: "#fff" }}
                 />
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8, alignItems: "center" }}>
-                  {aiGenLoading && <span style={{ fontSize: 12, color: "#6d28d9", marginRight: "auto" }}>Génération en cours, patiente quelques secondes…</span>}
+                  {aiGenLoading && <span style={{ fontSize: 12, color: "#6d28d9", marginRight: "auto" }}>
+                    {aiPreview.length > 0
+                      ? `Génération… ${aiPreview.length} chapitre${aiPreview.length > 1 ? "s" : ""}, ${aiPreview.reduce((n, c) => n + c.items.length, 0)} ligne(s)`
+                      : "Génération en cours…"}
+                  </span>}
                   <button onClick={() => { setAiGenOpen(false); setAiGenDesc("") }} disabled={aiGenLoading}
                     style={{ padding: "8px 16px", background: "#f1f5f9", color: "#374151", border: "none", borderRadius: 8, cursor: aiGenLoading ? "not-allowed" : "pointer", fontSize: 13 }}>
                     Annuler
@@ -638,6 +711,20 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
                     {aiGenLoading ? "Génération…" : "Générer ✦"}
                   </button>
                 </div>
+                {aiPreview.length > 0 && (
+                  <div style={{ marginTop: 12, maxHeight: 260, overflowY: "auto", border: "1px solid #ede9fe", borderRadius: 8, padding: 10, background: "#faf5ff" }}>
+                    {aiPreview.map((ch, ci) => (
+                      <div key={ci} style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#6d28d9" }}>{ch.title}</div>
+                        {ch.items.map((it, ii) => (
+                          <div key={ii} style={{ fontSize: 12, color: "#4b5563", paddingLeft: 12 }}>
+                            • {it.designation}{it.brand ? ` — ${it.brand}` : ""} <span style={{ color: "#9ca3af" }}>×{it.quantity} {it.unit}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
