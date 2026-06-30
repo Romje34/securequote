@@ -312,40 +312,26 @@ export default function QuoteEditorPage({ params }: { params: Promise<{ id: stri
         await saveHeader({ title: data.quote_object })
       }
 
-      let chPos = chapters.length
-      for (const ch of (data.chapters ?? [])) {
-        const cres = await fetch(`/api/quotes/${id}/chapters`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: ch.title || "Chapitre", position: chPos++ }),
-        })
-        if (!cres.ok) continue
-        const created = await cres.json()
-
-        const items: Item[] = []
-        let pos = 0
-        for (const it of (ch.items ?? [])) {
-          const ires = await fetch(`/api/quotes/${id}/chapters/${created.id}/items`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              row_type:    "item",
-              position:    pos++,
-              designation: it.designation ?? "",
-              reference:   it.reference || null,
-              brand:       it.brand || null,
-              unit:        it.unit || "U",
-              quantity:    it.quantity ?? 1,
-              is_labor:    it.category === "main_oeuvre",
-              buy_price:   0,
-              sell_price:  0,
-              discount:    0,
-            }),
-          })
-          if (ires.ok) items.push({ ...(await ires.json()), row_type: "item" })
-        }
-        setChapters(prev => [...prev, { id: created.id, position: created.position, title: created.title, items }])
+      // Persistance groupée : un seul appel insère tous les chapitres + lignes
+      // côté serveur (2 requêtes DB) au lieu d'une cascade de ~N allers-retours.
+      const bres = await fetch(`/api/quotes/${id}/bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start_position: chapters.length, chapters: data.chapters ?? [] }),
+      })
+      if (!bres.ok) {
+        const b = await bres.json().catch(() => ({}))
+        showToast(`Erreur enregistrement : ${b.error ?? bres.status}`)
+        return
       }
+      const { chapters: created } = await bres.json()
+      setChapters(prev => [
+        ...prev,
+        ...(created as Chapter[]).map(c => ({
+          ...c,
+          items: c.items.map(it => ({ ...it, row_type: "item" as RowType })),
+        })),
+      ])
 
       setAiGenOpen(false)
       setAiGenDesc("")

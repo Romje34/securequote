@@ -221,10 +221,13 @@ export async function POST(request: Request) {
 
   try {
     const message = await client.messages.create({
-      model: 'claude-opus-4-8',
+      model: 'claude-sonnet-4-6',
       max_tokens: 8192,
       system: SYSTEM_PROMPT,
-      output_config: { format: { type: 'json_schema', schema } },
+      // Génération structurée rapide : pas de thinking (réduit la latence),
+      // effort medium pour garder une nomenclature soignée.
+      thinking: { type: 'disabled' },
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema } },
       messages: [{ role: 'user', content: userPrompt }],
     })
 
