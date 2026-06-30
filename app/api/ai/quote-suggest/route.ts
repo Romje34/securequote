@@ -182,8 +182,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'description requise' }, { status: 400 })
     }
     const userPrompt =
-      `Génère une structure complète de devis pour ce projet :\n« ${description} »\n`
-      + `Organise en chapitres par métier/lot, avec pour chaque chapitre des lignes détaillées (matériel et main d'œuvre).\n\n`
+      `Génère un squelette de devis pour ce projet :\n« ${description} »\n`
+      + `Organise en chapitres par métier/lot. Reste CONCIS : vise 4 à 6 chapitres, et pour chacun 4 à 6 lignes ESSENTIELLES (le matériel principal + la main d'œuvre clé). `
+      + `Ne détaille pas chaque accessoire — l'intégrateur complétera ensuite. Va à l'essentiel pour une génération rapide.\n\n`
       + `IMPORTANT — Format de sortie : émets UNIQUEMENT une séquence de lignes JSON (NDJSON), une par ligne, sans aucun texte autour ni bloc de code.\n`
       + `1) D'abord exactement : {"t":"object","text":"<objet professionnel du devis>"}\n`
       + `2) Puis, pour chaque chapitre dans l'ordre : {"t":"chapter","i":<index entier 0,1,2…>,"title":"<titre du chapitre>"}\n`
@@ -202,7 +203,7 @@ export async function POST(request: Request) {
             max_tokens: 8192,
             system: SYSTEM_PROMPT,
             thinking: { type: 'disabled' },
-            output_config: { effort: 'medium' },
+            output_config: { effort: 'low' },
             messages: [{ role: 'user', content: userPrompt }],
           })
           for await (const event of llm) {
