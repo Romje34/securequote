@@ -24,6 +24,7 @@ type QuoteSummary = {
   title:        string | null
   status:       string
   company_id:   string | null
+  created_by:   string | null
   sent_at:      string | null
   signed_at:    string | null
   total_ht:     number
@@ -58,10 +59,12 @@ const EMPTY_FORM = {
   city: "", address_line_1: "", postal_code: "", country: "FR",
 }
 
-// Agrège les KPI d'un ensemble de sociétés (par leurs ids)
-function aggregateKpis(quotes: QuoteSummary[], companyIds: string[]) {
-  const set = new Set(companyIds)
-  const scoped = quotes.filter(q => q.company_id && set.has(q.company_id))
+// Agrège les KPI des devis créés par une personne (ventilation par created_by).
+// On ne peut PAS ventiler par société : un membre travaille sur les sociétés
+// partagées de l'owner (role='member'), qui n'apparaissent pas dans ses propres
+// sociétés → l'attribution par créateur est la seule fiable.
+function personKpis(quotes: QuoteSummary[], personId: string) {
+  const scoped = quotes.filter(q => q.created_by === personId)
   const won = scoped.filter(isWon)
   return {
     sent:     scoped.filter(q => q.sent_at).length,
@@ -325,8 +328,29 @@ export default function CompaniesPage() {
     )
   }
 
+  function renderOwnerCard() {
+    if (!user) return null
+    const ok = personKpis(quotes, user.id)
+    return (
+      <div style={{ ...S.itemCard, background: "#f0fdf4" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={S.memberEmail}>
+              {user.email} <span style={{ fontSize: 11, fontWeight: 700, color: "#0f766e", background: "#ccfbf1", borderRadius: 4, padding: "1px 7px", marginLeft: 4 }}>Moi</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "4px 0" }}>
+              <span style={S.badgeBlue}>✉ {ok.sent}</span>
+              <span style={S.badgeGreen}>✅ {ok.accepted}</span>
+              <span style={S.badgeDark}>💶 {fmtEur(ok.revenue)} €</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   function renderMemberCard(m: Member) {
-    const mk = aggregateKpis(quotes, m.companies.map(c => c.id))
+    const mk = personKpis(quotes, m.id)
     return (
       <div key={m.id} style={S.itemCard}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -490,6 +514,7 @@ export default function CompaniesPage() {
                 <button onClick={() => { setMemberMsg(""); setNewEmail(""); setShowMemberModal(true) }} style={S.panelAdd} title="Ajouter un membre">+</button>
               </div>
               <div style={S.panelBody}>
+                {renderOwnerCard()}
                 {members.length === 0
                   ? <div style={S.emptyInline}>Aucun membre. Clique « + Membre ».</div>
                   : members.map(m => renderMemberCard(m))}
