@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await db
     .from('quotes')
-    .select('id, quote_number, status, title, issued_at, valid_until, tva_rate, sent_at, signed_at, signed_by, public_token, company_id, client_id, clients(name), companies(company_name)')
+    .select('id, quote_number, status, title, issued_at, valid_until, tva_rate, sent_at, signed_at, signed_by, public_token, company_id, client_id, created_by, clients(name), companies(company_name)')
     .in('company_id', ids)
     .order('created_at', { ascending: false })
 
