@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import Anthropic from '@anthropic-ai/sdk'
 import { requireUser } from '@/lib/auth'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { checkRateLimit } from '@/lib/rate-limit'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
@@ -36,9 +36,6 @@ const CHAPTER_SCHEMA = {
   additionalProperties: false,
 }
 
-// Client service-role pour écrire le registre d'usage (RLS : insert réservé au backend).
-const adm = createAdminClient
-
 // Essai gratuit : nombre de générations complètes offertes à une org sans forfait.
 const FREE_DEVIS_LIMIT = 5
 
@@ -48,19 +45,23 @@ function startOfMonthISO() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
 }
 
-// Contrôle de quota IA avant génération.
-// Renvoie une réponse 402 (avec la liste des forfaits) si l'essai gratuit est épuisé
-// ou si le forfait n'a plus de crédits ce mois-ci ; sinon null (génération autorisée).
-async function quotaBlock(userId: string): Promise<NextResponse | null> {
-  const db = adm()
+// Contrôle de quota IA avant génération. Réutilise le client service-role de la
+// requête (au lieu d'en recréer un) et renvoie l'organisation résolue pour éviter
+// à recordUsage de la recharger ensuite.
+// `block` porte une réponse 402 (avec la liste des forfaits) si l'essai gratuit est
+// épuisé ou si le forfait n'a plus de crédits ce mois-ci ; sinon null (autorisé).
+async function quotaBlock(
+  db: SupabaseClient,
+  userId: string,
+): Promise<{ block: NextResponse | null; orgId: string | null }> {
   const { data: profile } = await db
     .from('profiles')
     .select('organization_id')
     .eq('id', userId)
     .single()
 
-  const orgId = profile?.organization_id
-  if (!orgId) return null // pas d'org → pas de quota (compte legacy)
+  const orgId = (profile?.organization_id as string | undefined) ?? null
+  if (!orgId) return { block: null, orgId: null } // pas d'org → pas de quota (compte legacy)
 
   // plan_id de l'org (colonne optionnelle tant que la migration crédits IA n'est pas appliquée).
   const { data: org } = await db
@@ -81,12 +82,15 @@ async function quotaBlock(userId: string): Promise<NextResponse | null> {
       .eq('organization_id', orgId)
       .eq('mode', 'full')
     if ((count ?? 0) >= FREE_DEVIS_LIMIT) {
-      return NextResponse.json(
-        { error: 'Essai gratuit épuisé', error_code: 'trial_exhausted', plans: await fetchPlans() },
-        { status: 402 }
-      )
+      return {
+        block: NextResponse.json(
+          { error: 'Essai gratuit épuisé', error_code: 'trial_exhausted', plans: await fetchPlans() },
+          { status: 402 },
+        ),
+        orgId,
+      }
     }
-    return null
+    return { block: null, orgId }
   }
 
   // Forfait : vérifier la consommation du mois courant.
@@ -103,37 +107,38 @@ async function quotaBlock(userId: string): Promise<NextResponse | null> {
     .gte('created_at', startOfMonthISO())
   const consumed = (usage ?? []).reduce((s, r) => s + (r.credits_consumed ?? 0), 0)
   if (consumed >= monthly) {
-    return NextResponse.json(
-      { error: 'Crédits IA épuisés', error_code: 'insufficient_credits', plans: await fetchPlans() },
-      { status: 402 }
-    )
+    return {
+      block: NextResponse.json(
+        { error: 'Crédits IA épuisés', error_code: 'insufficient_credits', plans: await fetchPlans() },
+        { status: 402 },
+      ),
+      orgId,
+    }
   }
-  return null
+  return { block: null, orgId }
 }
 
 // Enregistre la consommation IA (best-effort : n'échoue jamais la requête).
 // 1 crédit = 1 000 tokens (entrée + sortie), arrondi au crédit supérieur.
-async function recordUsage(opts: {
-  userId: string
-  mode: string
-  quoteId: string | null
-  inputTokens: number
-  outputTokens: number
-}) {
+// `orgId` est celui déjà résolu par quotaBlock — pas de relecture de `profiles`.
+async function recordUsage(
+  db: SupabaseClient,
+  opts: {
+    userId: string
+    orgId: string | null
+    mode: string
+    quoteId: string | null
+    inputTokens: number
+    outputTokens: number
+  },
+) {
+  if (!opts.orgId) return
   try {
-    const db = adm()
-    const { data: profile } = await db
-      .from('profiles')
-      .select('organization_id')
-      .eq('id', opts.userId)
-      .single()
-    if (!profile?.organization_id) return
-
     const total = opts.inputTokens + opts.outputTokens
     const credits = Math.ceil(total / 1000)
 
     await db.from('ai_usage').insert({
-      organization_id: profile.organization_id,
+      organization_id: opts.orgId,
       user_id: opts.userId,
       quote_id: opts.quoteId,
       mode: opts.mode === 'chapter' ? 'chapter' : 'full',
@@ -155,23 +160,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY non configurée' }, { status: 503 })
   }
 
-  // Anti-rafale : borne les appels IA par utilisateur (10 / minute), en complément du
-  // système de crédits. Empêche d'épuiser l'API Anthropic par requêtes parallèles avant
-  // que la consommation ne soit comptabilisée.
-  const allowed = await checkRateLimit(db, `ai:${user.id}`, 10, 60)
+  const body = await request.json().catch(() => ({}))
+  const mode: string = body.mode ?? 'full'
+
+  // Contrôles pré-IA lancés en parallèle : l'anti-rafale (10 appels/min par
+  // utilisateur, complément du système de crédits) et le quota (essai gratuit ou
+  // crédits du forfait) sont indépendants et n'ont besoin que de l'identifiant
+  // utilisateur. Les enchaîner en série ajoutait des allers-retours Supabase au
+  // temps avant le premier token.
+  const [allowed, quota] = await Promise.all([
+    checkRateLimit(db, `ai:${user.id}`, 10, 60),
+    quotaBlock(db, user.id),
+  ])
   if (!allowed) {
     return NextResponse.json(
       { error: 'Trop de requêtes IA en peu de temps. Patientez une minute.' },
       { status: 429 },
     )
   }
-
-  const body = await request.json().catch(() => ({}))
-  const mode: string = body.mode ?? 'full'
-
-  // Quota : essai gratuit (5 devis) ou crédits du forfait. Bloque avant de consommer l'API.
-  const blocked = await quotaBlock(user.id)
-  if (blocked) return blocked
+  if (quota.block) return quota.block
+  const orgId = quota.orgId
 
   // Mode « full » : génération complète en STREAMING NDJSON (une ligne JSON par
   // chapitre / ligne) → le client affiche le devis qui se construit en direct,
@@ -212,8 +220,9 @@ export async function POST(request: Request) {
             }
           }
           const final = await llm.finalMessage()
-          await recordUsage({
+          await recordUsage(db, {
             userId,
+            orgId,
             mode: 'full',
             quoteId,
             inputTokens: final.usage?.input_tokens ?? 0,
@@ -261,8 +270,9 @@ export async function POST(request: Request) {
     const text = message.content.find(b => b.type === 'text')?.text ?? ''
     const parsed = JSON.parse(text)
 
-    await recordUsage({
+    await recordUsage(db, {
       userId: user.id,
+      orgId,
       mode: 'chapter',
       quoteId: typeof body.quote_id === 'string' ? body.quote_id : null,
       inputTokens: message.usage?.input_tokens ?? 0,
