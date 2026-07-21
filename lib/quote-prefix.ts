@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 // Préfixe devis = 3 premières lettres du nom de l'organisation (tenant) du user.
 // Owners et members partagent le même organization_id → même préfixe.
-export function prefixFromName(name: string | null | undefined): string {
+function prefixFromName(name: string | null | undefined): string {
   if (!name) return 'DEV'
   const diacritics = new RegExp('[\\u0300-\\u036f]', 'g')   // marques d'accent combinantes
   const cleaned = name
